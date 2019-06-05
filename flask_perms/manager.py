@@ -21,9 +21,9 @@ class PermissionManager:
         self.usedPerms = set()  # Perms found in the app as a set
         self.dbPerms = []  # List of Permission objects found in the db
         self.dbPermNames = set()  # Perm names found in the db (as a set).
-        self.roles = []  # List of Role objects found in the db
+        self.roles = {}  # List of Role objects found in the db
         self.roleNames = set()  # Role names found in the db (as a set).
-        self.users = []  # List of User objects found in the db
+        self.users = {}  # List of User objects found in the db
         self.usedRoles = set()  # Roles specified in the app (as a set).
         self.missingPerms = set()  # Permissions specified in the app but not present in db (as a set).
         self.unutilizedPerms = set()  # Permissions specified in the db but not present in app (as a set).
@@ -42,9 +42,12 @@ class PermissionManager:
         else:
             self.path = os.path.dirname(sys.modules['__main__'].__file__)
 
-        self.codeParse()
         self.dbParse()
-        self.addDefaultPermissions()
+        self.codeParse()
+        self.addRolePerms()
+        self.integrateRoutesTemplates()
+        self.remapToBlueprint()
+        # self.addDefaultPermissions()
         self.appRouteParse()
         self.findUnprotectedRoutes()
         self.check_missing()
@@ -61,10 +64,6 @@ class PermissionManager:
         db.session.commit()
 
     def codeParse(self):
-        """
-        Parses declared Permissions and Roles in the app python code.
-        :return:
-        """
         tp = TemplateParser(path=self.path)
         pp = PyMain(path=self.path)
 
@@ -72,6 +71,13 @@ class PermissionManager:
         pp.run()
         self.templates = tp.output
         self.routesByFile = pp.output
+
+    def integrateRoutesTemplates(self):
+        """
+        Parses declared Permissions and Roles in the app python code.
+        :return:
+        """
+
 
         # Add template declared permissions to usedPerms Set
         for template in self.templates:
@@ -94,6 +100,7 @@ class PermissionManager:
                             self.usedPerms.add(perm)
                         for role in self.routesByFile[file][bp][route]['roles']: # add route permissions to usedPerms set
                             self.usedRoles.add(role)
+
                         # ToDo need to rewrite this with recursive algo to allow checking of sub_levels
                         if template in self.routesByFile[file][bp][route]['templates']:
                             self.routesByFile[file][bp][route]['templates'][template] = self.templates[template]
@@ -107,7 +114,7 @@ class PermissionManager:
                             self.templates[template]['renders'][bp][route]['roles'] = self.routesByFile[file][bp][route]['roles']
                             self.templates[template]['renders'][bp][route]['file'] = file
 
-
+        """
         # Generate dict of protected routes by blueprint, remap file to key in each route.
         for file in pp.output:
             for bp in pp.output[file]:
@@ -118,13 +125,26 @@ class PermissionManager:
                         raise RuntimeError(f'<{route}> is referenced twice in blueprint {bp}')
                     self.routesByBlueprint[bp][route] = pp.output[file][bp][route]
                     self.routesByBlueprint[bp][route]['file'] = file
+        """
+
+    def remapToBlueprint(self):
+        for file in self.routesByFile:
+            for bp in self.routesByFile[file]:
+                if bp not in self.routesByBlueprint.keys():
+                    self.routesByBlueprint[bp] = {}
+                for route in self.routesByFile[file][bp]:
+                    if route in self.routesByBlueprint[bp].keys():
+                        raise RuntimeError(f'<{route}> is referenced twice in blueprint {bp}')
+                    self.routesByBlueprint[bp][route] = self.routesByFile[file][bp][route]
+                    self.routesByBlueprint[bp][route]['file'] = file
 
     def dbParse(self):
         """
         Parses declared Permissions and Roles in the app database.
         :return:
         """
-        self.roles = Role.query.all()
+        for role in Role.query.all():
+            self.roles[role] = {}
         roleNameList = []
         for role in self.roles:
             roleNameList.append(role.name)
@@ -138,7 +158,8 @@ class PermissionManager:
 
         self.dbPerms = Permission.query.all()
 
-        self.users = User.query.all()
+        for user in User.query.all():
+            self.users[user] = {}
         dbPermNameList = []
         for perm in self.dbPerms:
             dbPermNameList.append(perm.name)
@@ -179,32 +200,50 @@ class PermissionManager:
         self.unutilizedPerms = self.dbPermNames - self.usedPerms - self.defaultPerms
         self.missingRoles = self.usedRoles - self.roleNames
 
-    def role_parse(self):
+    def addRolePerms(self):
         """
-        add role based permissions to routesByBlueprint dict., and generate 'all_permissions' key containing set of
+        add role based permissions to routesByFile dict., and generate 'all_permissions' key containing set of
         permission derived from permission list and roles.
+        Also, generates a traceback of templates by way of bp/route/ifstatemtns that
         :return:
         """
-        def parse_subLevel(subLevel, pathThusFar):
+
+        def parse_subLevel(subLevel):
+            for roleName in subLevel['roles']:
+                for role in self.roles:
+                    if role.name == roleName:
+                        subLevel['roles'][roleName] = role.allPermissionsRoles()[0]
+                        subLevel['all_permissions'].add(perm for perm in subLevel['roles'][roleName])
+            for subLevel2 in subLevel['sublevels']:
+                subLevel['sublevels'][subLevel2] = parse_subLevel(subLevel)
+            return subLevel
+
+        for file in self.routesByFile:
+            for bp in self.routesByFile[file]:
+                for route in self.routesByFile[file][bp]:
+                    # add route perms to all_permissions
+                    self.routesByFile[file][bp][route]['all_permissions'] = set()
+                    self.routesByFile[file][bp][route]['all_permissions'].add(perm for perm in self.routesByFile[file][bp][route]['permissions'])
+
+                    # add route role perms, and add to all_permissions
+                    for roleName in self.routesByFile[file][bp][route]['roles']:
+                            for role in self.roles:
+                                if role.name == roleName:
+                                    self.routesByFile[file][bp][route]['roles'][roleName] = role.allPermissionsRoles()[0]
+                                    self.routesByFile[file][bp][route]['all_permissions'].add(perm for perm in self.routesByFile[file][bp][route]['roles'][roleName])
+
+                    # Recursive check of sublevels
+                    for subLevel in self.routesByFile[file][bp][route]['sublevels']:
+                        self.routesByFile[file][bp][route]['sublevels'][subLevel] = parse_subLevel(subLevel)
+
+    def generateUserAccessTree(self):
+        # generate list of
+
+        for user in self.users:
             pass
 
-
-        for bp in self.routesByBlueprint:
-            for route in self.routesByBlueprint[bp]:
-                # add route perms to all_permissions
-                self.routesByBlueprint[bp][route]['all_permissions'] = set()
-                self.routesByBlueprint[bp][route]['all_permissions'].add(perm for perm in self.routesByBlueprint[bp][route]['permissions'])
-                # add route role perms, and add to all_permissions
-                for roleName in self.routesByBlueprint[bp][route]['roles']:
-                        for role in self.roles:
-                            if role.name == roleName:
-                                self.routesByBlueprint[bp][route]['roles'][roleName] = role.allPermissionsRoles()[0]
-                                self.routesByBlueprint[bp][route]['all_permissions'].add(perm for perm in self.routesByBlueprint[bp][route]['roles'][roleName])
-
-                for subLevel in self.routesByBlueprint[bp][route]['sublevels']:
-                    parse_subLevel(subLevel, f'{bp}->{route}')
-
-
+    def generateRoleAccessTree(self):
+        pass
 
 
 
@@ -513,6 +552,7 @@ class PyMain:
 
     def __init__(self, path=None):
         self.output = {}
+        self.permChecks = []
         self.pyFiles = []
         self.nodes = []
         if path:
@@ -592,10 +632,10 @@ class PermCheckAnalyzer(ast.NodeVisitor):
 
 class RouteAnalyzer(ast.NodeVisitor):
     def __init__(self, permCheckDict):
-        self.routes = {}
-        self.decorators = []
-        self.nodes = []
-        self.permChecks = permCheckDict
+        self.routes = {} # the parsed routing tree.
+        self.permChecks = permCheckDict  # Before analysis, holds the passed in dict of all permissionCheck instances.
+                                         # after analysis, this holds a dict of permission checks run outside of a
+                                         # route context.
 
     def visit_FunctionDef(self, node):
         print("went to function function")
@@ -625,8 +665,6 @@ class RouteAnalyzer(ast.NodeVisitor):
                                         permFunc = True
                                         break
                         if permFunc:
-                            if node.name == "admin_customers":
-                                self.nodes.append(node)
                             # Found a permission_required decorated route.
 
                             # get the permission required info, and also other decorators present
