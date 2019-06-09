@@ -1,0 +1,67 @@
+{# {% from "macros.html" import permissioned with context %} #}
+
+
+{% macro permissioned(p_list,
+                      p_action,
+                      np_action="#",
+                      p_class="",
+                      np_class="",
+                      span=True,
+                      display="tooltip",
+                      np_text="Insufficient Permissions",
+                      perm_set=current_user.permSet ) -%}
+  {# takes in a permission list and checks against specified permission set (defaults to current_user).
+  Arguments:
+  display: ['tooltip', 'replace', 'custom'] replace prevents rendering completely and replaces with
+    #}
+
+
+  {% if span %}
+
+      {% if permlist | is_subset(perm_set) %}
+
+        caller(class=perm_class, perm_action)
+
+      {% elif [VIEW_MISSING_PERMISSION] in is_subset(perm_set) %}
+
+        <span tabindex="0" data-toggle="tooltip" title="Insufficient Permissions; requires {{ perm_list }}">
+        caller(class=no_perm_class, perm_action=no_perm_action)
+        </span>
+
+      {% else %}
+
+        <span tabindex="0" data-toggle="tooltip" title="Insufficient permissions">
+        caller(class=no_perm_class, action=no_perm_action)
+        </span>
+
+    	{% endif %}
+
+  {% else %}
+
+      {% if permlist | is_subset(perm_set) %}
+
+        caller(class=perm_class, perm_action, text=perm_text
+
+      {% elif [VIEW_MISSING_PERMISSION] in is_subset(perm_set) %}
+
+
+        caller(class=no_perm_class, perm_action=no_perm_action, text=no_perm_text+" Requires: "+perm_list)
+
+      {% else %}
+
+
+        caller(class=no_perm_class, action=no_perm_action, text=no_perm_text)
+
+
+    	{% endif %}
+  {% endif %}
+{%- endmacro %}
+
+
+
+
+{#
+{% call(class, perm_action) permissioned(p_list=['TEST_PERMISSION'], p_action=url_for('admin.admin_accounts'), p_class="success", np_class="secondary disabled") %}
+    <a class="btn btn-{{ class }}" href="{{ action }}">Account Administration</a>
+{% endcall %}
+#}

@@ -1,6 +1,4 @@
-from flask import current_app
-
-from app import db
+from site import db
 
 
 class User(db.Model):

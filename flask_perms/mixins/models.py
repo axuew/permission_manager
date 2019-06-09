@@ -1,6 +1,4 @@
-from flask import current_app
-
-from app import db
+from site import db
 
 
 class User(db.Model):
@@ -8,7 +6,6 @@ class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     roles = db.relationship('Role', secondary='user_role_links')
     permissions = db.relationship('Permission', secondary='user_permission_links')
-
 
     def addRole(self, role=None, roleName=None, roleId=None):
         """
