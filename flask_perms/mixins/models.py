@@ -1,11 +1,45 @@
 from testapp import db
+from flask import current_app
+from sqlalchemy.ext.declarative import declared_attr
+
+app_config = current_app.config
+
+user_model = app_config['USER_MODEL_NAME']
+role_model = app_config['ROLE_MODEL_NAME']
+perm_model = app_config['PERMISSION_MODEL_NAME']
+
+user_pk = app_config['USER_PRIMARY_KEY']  # String name of User model's primary key
+role_pk = app_config['ROLE_PRIMARY_KEY']  # String name of Role model's primary key
+perm_pk = app_config['PERMISSION_PRIMARY_KEY']
+
+user_table = app_config['USER_TABLE_NAME']
+role_table = app_config['ROLE_TABLE_NAME']
+perm_table = app_config['PERMISSION_TABLE_NAME']
+
+Role = None
+User = None
+Permission = None
+
+for c in db.Model._decl_class_registry.values():
+    if hasattr(c, '__tablename__'):
+        if c.__tablename__ == user_table:
+            User = c
+        elif c.__tablename__ == role_table:
+            Role = c
+        elif c.__tablename__ == perm_table:
+            Permission = c
 
 
-class User(db.Model):
+class UserMixinP(db.Model):
     __tablename__ = "users"
-    id = db.Column(db.Integer, primary_key=True)
-    roles = db.relationship('Role', secondary='user_role_links')
-    permissions = db.relationship('Permission', secondary='user_permission_links')
+    __abstract__ = True
+    @declared_attr
+    def roles(cls):
+        return db.relationship(role_model, secondary='user_role_links')
+
+    @declared_attr
+    def permissions(cls):
+        return db.relationship(perm_model, secondary='user_permission_links')
 
     def addRole(self, role=None, roleName=None, roleId=None):
         """
@@ -28,7 +62,7 @@ class User(db.Model):
             if not addedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
-            addedRole = Role.query.filter_by(id=roleId).first()
+            addedRole = Role.query.filter_by(**{role_pk: roleId}).first()
             if not addedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -57,7 +91,7 @@ class User(db.Model):
             if not removedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
-            removedRole = Role.query.filter_by(id=roleId).first()
+            removedRole = Role.query.filter_by(**{role_pk: roleId}).first()
             if not removedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -65,7 +99,6 @@ class User(db.Model):
 
         if removedRole not in self.roles:
             return False, f"{self} does not directly have {removedRole}."
-
 
         self.roles.remove(removedRole)
         db.session.add(self)
@@ -145,8 +178,8 @@ class User(db.Model):
 
 class RoleLink(db.Model):
     __tablename__ = "role_links"
-    parent_id = db.Column(db.Integer, db.ForeignKey('roles.id'), primary_key=True)
-    role_id = db.Column(db.Integer, db.ForeignKey('roles.id'), primary_key=True)
+    parent_id = db.Column(db.Integer, db.ForeignKey(role_table+'.'+role_pk), primary_key=True)
+    role_id = db.Column(db.Integer, db.ForeignKey(role_table+'.'+role_pk), primary_key=True)
 
 
 def inheritedRoles(role, roleNameSet=None):
@@ -163,15 +196,25 @@ def inheritedRoles(role, roleNameSet=None):
     return roleNameSet
 
 
-class Role(db.Model):
+class RoleMixinP(db.Model):
     __tablename__ = "roles"
-    id = db.Column(db.Integer, primary_key=True)
+    __abstract__ = True
     name = db.Column(db.String(64), unique=True)
     description = db.Column(db.Text)
-    users = db.relationship('User', secondary='user_role_links')
-    permissions = db.relationship('Permission', secondary='role_permission_links')
-    parents = db.relationship('Role', secondary='role_links', primaryjoin=RoleLink.role_id == id,
-                                secondaryjoin=RoleLink.parent_id == id, backref="children")
+
+    @declared_attr
+    def users(cls):
+        return db.relationship(user_model, secondary='user_role_links')
+
+    @declared_attr
+    def permissions(cls):
+        return db.relationship(perm_model, secondary='role_permission_links')
+
+    @declared_attr
+    def parents(cls):
+        return db.relationship(role_model, secondary='role_links',
+                               primaryjoin=f"RoleLink.role_id==%s.{role_pk}" % cls.__name__,
+                               secondaryjoin=f"RoleLink.parent_id==%s.{role_pk}" % cls.__name__, backref="children")
 
     def __repr__(self):
         return '<Role %r>' % self.name
@@ -201,7 +244,7 @@ class Role(db.Model):
         elif roleId:
             if self.id == int(roleId):
                 return False, f'Role cannot inherit itself.'
-            inheritedRole = Role.query.filter_by(id=roleId).first()
+            inheritedRole = Role.query.filter_by(**{role_pk: roleId}).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -243,7 +286,7 @@ class Role(db.Model):
         elif roleId:
             if self.id == int(roleId):
                 return False, f'Role cannot remove itself.'
-            inheritedRole = Role.query.filter_by(id=roleId).first()
+            inheritedRole = Role.query.filter_by(**{role_pk: roleId}).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -329,13 +372,20 @@ class Role(db.Model):
         return rolePermsSet, previousRoleNames
 
 
-class Permission(db.Model):
+class PermissionMixinP(db.Model):
     __tablename__ = "permissions"
+    __abstract__ = True
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(64), unique=True)
     description = db.Column(db.Text)
-    users = db.relationship('User', secondary='user_permission_links')
-    roles = db.relationship('Role', secondary='role_permission_links')
+
+    @declared_attr
+    def users(cls):
+        return db.relationship(user_model, secondary='user_permission_links')
+
+    @declared_attr
+    def roles(cls):
+        return db.relationship(role_model, secondary='role_permission_links')
 
     def __repr__(self):
         return '<Permission %r>' % self.name
@@ -343,17 +393,17 @@ class Permission(db.Model):
 
 class UserPermissionLink(db.Model):
     __tablename__ = "user_permission_links"
-    user_id_num = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
-    perm_id_num = db.Column(db.Integer, db.ForeignKey('permissions.id'), primary_key=True)
+    user_id_num = db.Column(db.Integer, db.ForeignKey(user_table+'.'+user_pk), primary_key=True)
+    perm_id_num = db.Column(db.Integer, db.ForeignKey(perm_table+'.'+perm_pk), primary_key=True)
 
 
 class RolePermissionLink(db.Model):
     __tablename__ = "role_permission_links"
-    role_id_num = db.Column(db.Integer, db.ForeignKey('roles.id'), primary_key=True)
-    perm_id_num = db.Column(db.Integer, db.ForeignKey('permissions.id'), primary_key=True)
+    role_id_num = db.Column(db.Integer, db.ForeignKey(role_table+'.'+role_pk), primary_key=True)
+    perm_id_num = db.Column(db.Integer, db.ForeignKey(perm_table+'.'+perm_pk), primary_key=True)
 
 
 class UserRoleLink(db.Model):
     __tablename__ = "user_role_links"
-    user_id_num = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
-    role_id_num = db.Column(db.Integer, db.ForeignKey('roles.id'), primary_key=True)
+    user_id_num = db.Column(db.Integer, db.ForeignKey(user_table+'.'+user_pk), primary_key=True)
+    role_id_num = db.Column(db.Integer, db.ForeignKey(role_table+'.'+role_pk), primary_key=True)

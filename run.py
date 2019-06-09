@@ -1,12 +1,13 @@
 from testapp import create_app, db
-from testapp.models import User, Role, Permission
+
 
 app = create_app()
 
 
 @app.shell_context_processor
 def make_shell_context():
-    return dict(db=db, User=User, Role=Role, Permission=Permission)
+
+    return dict(db=db)
 
 
 if __name__ == '__main__':

@@ -1,1 +1,1 @@
-from .models import User, Role, Permission
+from .models import UserMixinP, RoleMixinP, PermissionMixinP
