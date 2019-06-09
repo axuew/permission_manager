@@ -1,29 +1,27 @@
 import os
 import sys
-import ast
 
 from flask import current_app, url_for
 from pprint import pprint
-from jinja2 import Environment, FileSystemLoader, meta, visitor
 
 from app import db
 from .mixins.models import Role, Permission, User
 from .settings import ROOT_ROLE, defaultPermissions  # PERMISSION_FILE, ROLE_FILE
-
-
+from .parsers import TemplateParser, PyMain
 
 
 class PermissionManager:
     def __init__(self, path=None, rootRole=ROOT_ROLE):
         self.templates = {}  # Raw Template Dict, organized by html
         self.routesByFile = {}  # Raw Code Dict, organized by python file.
+        self.permChecks = []
         self.routesByBlueprint = {}  # Dict rewrite of routesByFile, re-oganized by Blueprint.  Include template info.
         self.usedPerms = set()  # Perms found in the app as a set
         self.dbPerms = []  # List of Permission objects found in the db
         self.dbPermNames = set()  # Perm names found in the db (as a set).
-        self.roles = {}  # List of Role objects found in the db
+        self.roles = []  # List of Role objects found in the db
         self.roleNames = set()  # Role names found in the db (as a set).
-        self.users = {}  # List of User objects found in the db
+        self.users = []  # List of User objects found in the db
         self.usedRoles = set()  # Roles specified in the app (as a set).
         self.missingPerms = set()  # Permissions specified in the app but not present in db (as a set).
         self.unutilizedPerms = set()  # Permissions specified in the db but not present in app (as a set).
@@ -42,6 +40,7 @@ class PermissionManager:
         else:
             self.path = os.path.dirname(sys.modules['__main__'].__file__)
 
+    def init(self):
         self.dbParse()
         self.codeParse()
         self.addRolePerms()
@@ -51,6 +50,10 @@ class PermissionManager:
         self.appRouteParse()
         self.findUnprotectedRoutes()
         self.check_missing()
+
+    def re_init(self):
+        self.__init__()
+        self.init()
 
     def addDefaultPermissions(self):
         perms = []
@@ -71,6 +74,7 @@ class PermissionManager:
         pp.run()
         self.templates = tp.output
         self.routesByFile = pp.output
+        self.permChecks = pp.permChecks
 
     def integrateRoutesTemplates(self):
         """
@@ -78,6 +82,16 @@ class PermissionManager:
         :return:
         """
 
+        def add_template_to_subLevel(subLevel, template):
+            for perm in subLevel['permissions']:
+                self.usedPerms.add(perm)
+            for role in subLevel['roles']:
+                self.usedRoles.add(role)
+            if template in subLevel['templates']:
+                subLevel['templates'][template] = self.templates[template]
+            for subLevel2 in subLevel['sub_levels']:
+                subLevel['sub_levels'][subLevel2] = add_template_to_subLevel(subLevel['sub_levels'][subLevel2], template)
+            return subLevel
 
         # Add template declared permissions to usedPerms Set
         for template in self.templates:
@@ -101,18 +115,32 @@ class PermissionManager:
                         for role in self.routesByFile[file][bp][route]['roles']: # add route permissions to usedPerms set
                             self.usedRoles.add(role)
 
-                        # ToDo need to rewrite this with recursive algo to allow checking of sub_levels
+
                         if template in self.routesByFile[file][bp][route]['templates']:
-                            self.routesByFile[file][bp][route]['templates'][template] = self.templates[template]
+                            self.routesByFile[file][bp][route]['templates'][template]['uses'] = self.templates[template]['uses']
                             if bp not in self.templates[template]['renders'].keys():
                                 self.templates[template]['renders'][bp] = {}
                             if route not in self.templates[template]['renders'][bp].keys():
                                 self.templates[template]['renders'][bp][route] = {}
+                            for key in self.routesByFile[file][bp][route]:
+                                if key == 'sub_levels' or key == 'templates':
+                                    pass
+                                else:
+                                    self.templates[template]['renders'][bp][route][key] = self.routesByFile[file][bp][route][key]
+                            self.templates[template]['renders'][bp][route]['file'] = file
+
+                            """
                             self.templates[template]['renders'][bp][route]['line_number'] = self.routesByFile[file][bp][route]['line_number']
                             self.templates[template]['renders'][bp][route]['other_decorators'] = self.routesByFile[file][bp][route]['other_decorators']
                             self.templates[template]['renders'][bp][route]['permissions'] = self.routesByFile[file][bp][route]['permissions']
                             self.templates[template]['renders'][bp][route]['roles'] = self.routesByFile[file][bp][route]['roles']
                             self.templates[template]['renders'][bp][route]['file'] = file
+                            """
+
+                        # Recursive check of sublevels
+                        for subLevel in self.routesByFile[file][bp][route]['sub_levels']:
+                            self.routesByFile[file][bp][route]['sub_levels'][subLevel] = add_template_to_subLevel(self.routesByFile[file][bp][route]['sub_levels'][subLevel], template)
+
 
         """
         # Generate dict of protected routes by blueprint, remap file to key in each route.
@@ -128,6 +156,7 @@ class PermissionManager:
         """
 
     def remapToBlueprint(self):
+        self.routesByBlueprint = {}
         for file in self.routesByFile:
             for bp in self.routesByFile[file]:
                 if bp not in self.routesByBlueprint.keys():
@@ -143,8 +172,9 @@ class PermissionManager:
         Parses declared Permissions and Roles in the app database.
         :return:
         """
+        self.roles = []
         for role in Role.query.all():
-            self.roles[role] = {}
+            self.roles.append(role)
         roleNameList = []
         for role in self.roles:
             roleNameList.append(role.name)
@@ -158,8 +188,9 @@ class PermissionManager:
 
         self.dbPerms = Permission.query.all()
 
+        self.users = []
         for user in User.query.all():
-            self.users[user] = {}
+            self.users.append(user)
         dbPermNameList = []
         for perm in self.dbPerms:
             dbPermNameList.append(perm.name)
@@ -213,9 +244,10 @@ class PermissionManager:
                 for role in self.roles:
                     if role.name == roleName:
                         subLevel['roles'][roleName] = role.allPermissionsRoles()[0]
-                        subLevel['all_permissions'].add(perm for perm in subLevel['roles'][roleName])
-            for subLevel2 in subLevel['sublevels']:
-                subLevel['sublevels'][subLevel2] = parse_subLevel(subLevel)
+                        for perm in subLevel['roles'][roleName]:
+                            subLevel['all_permissions'].add(perm)
+            for subLevel2 in subLevel['sub_levels']:
+                subLevel['sub_levels'][subLevel2] = parse_subLevel(subLevel['sub_levels'][subLevel2])
             return subLevel
 
         for file in self.routesByFile:
@@ -223,18 +255,20 @@ class PermissionManager:
                 for route in self.routesByFile[file][bp]:
                     # add route perms to all_permissions
                     self.routesByFile[file][bp][route]['all_permissions'] = set()
-                    self.routesByFile[file][bp][route]['all_permissions'].add(perm for perm in self.routesByFile[file][bp][route]['permissions'])
+                    for perm in self.routesByFile[file][bp][route]['permissions']:
+                        self.routesByFile[file][bp][route]['all_permissions'].add(perm)
 
                     # add route role perms, and add to all_permissions
                     for roleName in self.routesByFile[file][bp][route]['roles']:
                             for role in self.roles:
                                 if role.name == roleName:
                                     self.routesByFile[file][bp][route]['roles'][roleName] = role.allPermissionsRoles()[0]
-                                    self.routesByFile[file][bp][route]['all_permissions'].add(perm for perm in self.routesByFile[file][bp][route]['roles'][roleName])
+                                    for perm in self.routesByFile[file][bp][route]['roles'][roleName]:
+                                        self.routesByFile[file][bp][route]['all_permissions'].add(perm)
 
                     # Recursive check of sublevels
-                    for subLevel in self.routesByFile[file][bp][route]['sublevels']:
-                        self.routesByFile[file][bp][route]['sublevels'][subLevel] = parse_subLevel(subLevel)
+                    for subLevel in self.routesByFile[file][bp][route]['sub_levels']:
+                        self.routesByFile[file][bp][route]['sub_levels'][subLevel] = parse_subLevel(self.routesByFile[file][bp][route]['sub_levels'][subLevel])
 
     def generateUserAccessTree(self):
         # generate list of
@@ -368,6 +402,32 @@ class PermissionManager:
         print('---------------------------------------')
         print('')
 
+        print('---Users with Roles/Permissions---')
+        for user in self.users:
+            if user.permissions or user.roles:
+                print(user)
+                if user.roles:
+                    print('   Roles:\n\t', end='')
+                    for i, role in enumerate(user.roles):
+                        if i+1 == len(user.roles):
+                            print(role.name)
+                        else:
+                            print(role.name, end=", ")
+
+                if user.permissions:
+                    print('   Explicit Permissions:\n\t', end='')
+                    for i, perm in enumerate(user.permissions):
+                        if i+1 == len(user.permissions):
+                            print(perm.name)
+                        else:
+                            print(perm.name, end=", ")
+                print('')
+        print('---------------------------------------')
+        print('')
+
+
+
+
 
         # generate dict permissions with where they're used, set of missing permissions
 
@@ -456,454 +516,15 @@ class PermissionManager:
             for bp in self.routesByBlueprint:
                 for route in self.routesByBlueprint[bp]:
                     pass
-                    #check if user has route permissions
+                    """
+                    first, generate a list of all routing paths by blueprint, and all route permutations without 
+                    a route.  this will be used to determine if the user has full permissions in that route/bp for the
+                    summary report.  also generate explicit routing permissions.
+                    Would be also nice to see: If a user has access, determine the source of that access (roles, 
+                    explicit permissions) 
+                    first, check if user has route permissions. if so, add bp->route to list. maybe add user to a new 
+                    key, users_with_access?  if a template, add as well.  if sublevels, list 
+                    """
 
-
-
-
-
-
-class TemplateParser:
-    def __init__(self, path=None):
-        self.output = {}
-        self.roots = []
-        self.htmlFiles = []
-        if path:
-            self.path = path
-        else:
-            self.path = os.path.dirname(sys.modules['__main__'].__file__)
-
-    def run(self):
-        self.output = {}
-        self.roots = []
-        self.htmlFiles = []
-
-        # get all html files and paths in application
-        for root, dirs, files in os.walk(self.path):
-            for file in files:
-                if file.endswith(".html"):
-                    self.roots.append(root)
-                    self.htmlFiles.append(file)
-
-        for i in range(len(self.htmlFiles)):
-            jinjaEnv = Environment(autoescape=False, loader=FileSystemLoader(self.roots[i]), trim_blocks=False)
-            jinjaEnv.filters['is_subset'] = self.is_subset
-            temp_source = jinjaEnv.loader.get_source(jinjaEnv, self.htmlFiles[i])
-            self.parsed_content = jinjaEnv.parse(temp_source[0])
-
-            analyzerH = _TemplateWalker()
-            analyzerH.visit(self.parsed_content)
-            if analyzerH.instances:
-                pathAppend = ""
-                rootDiv = self.roots[i].split(sep='\\')
-                if current_app.template_folder in rootDiv:
-                    templateIndex = rootDiv.index(current_app.template_folder)
-                    if templateIndex < len(rootDiv)-1:
-                        for j in range(templateIndex+1, len(rootDiv)):
-                            pathAppend += rootDiv[j] + '/'
-
-                self.output[pathAppend+self.htmlFiles[i]] = analyzerH.instances
-
-    def printResults(self):
-        pprint(self.output)
-
-    @staticmethod
-    def is_subset(checkSet, mainSet):
-        checkSet = set(checkSet)
-        mainSet = set(mainSet)
-        if checkSet.issubset(mainSet):
-            return True
-        else:
-            return False
-
-    def listPerms(self):
-        permList = []
-        for page in self.output:
-            for instance in page:
-                permList.extend(instance['permissions'])
-        return permList
-
-
-class _TemplateWalker(visitor.NodeVisitor):
-
-    def __init__(self):
-        self.instances = {}
-        self.counter = 0
-
-    def visit_If(self, node):
-        if hasattr(node.test, 'name'):
-            if node.test.name == "is_subset":
-                self.instances[node.lineno] = {}
-                self.instances[node.lineno]['permissions'] = []
-                for perm in node.test.node.items:
-                    self.instances[node.lineno]['permissions'].append(perm.value)
-                if node.elif_:
-                    self.instances[node.lineno]['elif'] = node.elif_[0].lineno
-                if node.else_:
-                    self.instances[node.lineno]['else'] = node.else_[0].lineno
-
-                self.instances[node.lineno]['permSet'] = node.test.args[0].node.name + '.' + node.test.args[0].attr
-                # print('found!')
-                # print(node.node.items[0].value)
-
-import sys
-
-class PyMain:
-
-    def __init__(self, path=None):
-        self.output = {}
-        self.permChecks = []
-        self.pyFiles = []
-        self.nodes = []
-        if path:
-            self.path = path
-        else:
-            self.path = os.path.dirname(sys.modules['__main__'].__file__)
-
-    def run(self):
-        self.output = {}
-        self.pyFiles = []
-        for root, dirs, files in os.walk(self.path):
-            for file in files:
-                if file.endswith(".py"):
-                    self.pyFiles.append(root + "\\" + file)
-
-        for file in self.pyFiles:
-            if os.path.split(file)[-1] == 'analyzer.py':
-                continue
-            with open(file, "r") as source:
-                tree = ast.parse(source.read())
-
-                permCheckAnalyzer = PermCheckAnalyzer()
-
-                routeAnalyzer = RouteAnalyzer(permCheckAnalyzer.permChecks)
-                routeAnalyzer.visit(tree)
-                if routeAnalyzer.routes:
-                    self.output[os.path.relpath(file, self.path)] = routeAnalyzer.routes
-                    self.nodes.append(routeAnalyzer.nodes)
-                    self.permChecks = routeAnalyzer.permChecks
-
-    def printResults(self):
-        pprint(self.output)
-
-    def listDeclaredPerms(self):
-        permList = []
-        for file in self.output:
-            for blueprint in file:
-                for route in blueprint:
-                    permList.extend(route['permissions'])
-        return permList
-
-
-
-
-class PermCheckAnalyzer(ast.NodeVisitor):
-    def __init__(self):
-        self.permChecks = {}
-
-    def visit_Call(self, node):
-        print("went to call function")
-        if isinstance(node.func, ast.Name):
-            if node.func.id == "blueprint_permission_required":
-                pass
-            if node.func.id == "permissionCheck":
-                print('CALL FOUND PERMISSION CHECK:', node.lineno)
-                self.permChecks[node.lineno] = {'permissions': [], 'roles': {}}
-                # Get values if declared as args instead of kwargs
-                if node.args:
-                    for perm in node.args[0].elts:
-                        self.permChecks[node.lineno]['permissions'].append(perm.s)
-                    if len(node.args) > 1:
-                        for role in node.args[1].elts:
-                            self.permChecks[node.lineno]['roles'][role.s] = {}
-
-                # get values if declared as kwargs
-                for arg in node.keywords:
-                    if arg.arg == "permissions":
-                        for perm in arg.value.elts:
-                            self.permChecks[node.lineno]['permissions'].append(perm.s)
-                    elif arg.arg == "roles":
-                        # ToDo finish roles tree walk
-                        for role in arg.value.elts:
-                            self.permChecks[node.lineno]['roles'][role.s] = {}
-        self.generic_visit(node)
-
-
-
-class RouteAnalyzer(ast.NodeVisitor):
-    def __init__(self, permCheckDict):
-        self.routes = {} # the parsed routing tree.
-        self.permChecks = permCheckDict  # Before analysis, holds the passed in dict of all permissionCheck instances.
-                                         # after analysis, this holds a dict of permission checks run outside of a
-                                         # route context.
-
-    def visit_FunctionDef(self, node):
-        print("went to function function")
-        # Finds all routes.
-        # Get route info
-        if node.decorator_list:
-            if isinstance(node.decorator_list[0], ast.Call):
-                if isinstance(node.decorator_list[0].func, ast.Attribute):
-                    if node.decorator_list[0].func.attr == 'route':
-                        # found a route declaration
-                        blueprint = node.decorator_list[0].func.value.id # will just be 'app' if not a blueprint
-
-                        # if the blueprint hasn't been seen yet, save to dict
-                        if blueprint not in self.routes.keys():
-                            self.routes[blueprint] = {}
-
-                        # Save the route endpoint
-                        self.routes[blueprint][node.name] = {'url': node.decorator_list[0].args[0].s,
-                                                             'permissions': [], 'roles': {}, 'line_number': node.lineno,
-                                                             'other_decorators': [], 'templates': {}, 'sub_levels': {}}
-
-                        permFunc = False
-                        for dec in node.decorator_list[1:]:
-                            if isinstance(dec, ast.Call):
-                                if isinstance(dec.func, ast.Name):
-                                    if dec.func.id == 'permission_required':
-                                        permFunc = True
-                                        break
-                        if permFunc:
-                            # Found a permission_required decorated route.
-
-                            # get the permission required info, and also other decorators present
-                            for dec in node.decorator_list[1:]:
-                                if isinstance(dec, ast.Call):
-                                    if isinstance(dec.func, ast.Name):
-                                        if dec.func.id == 'permission_required':
-
-                                            if dec.args:
-                                                for perm in dec.args[0].elts:
-                                                    self.routes[blueprint][node.name]['permissions'].append(perm.s)
-                                                if len(dec.args) > 1:
-                                                    for role in dec.args[1].elts:
-                                                        self.routes[blueprint][node.name]['roles'][role.s] = []
-
-                                            if dec.keywords:
-                                                for arg in dec.keywords:
-                                                    if arg.arg == "permissions":
-                                                        for perm in arg.value.elts:
-                                                            self.routes[blueprint][node.name]['permissions'].append(perm.s)
-                                                    elif arg.arg == "roles":
-                                                        # ToDo finish roles tree walk
-                                                        for role in arg.value.elts:
-                                                            self.routes[blueprint][node.name]['roles'][role.s] = []
-                                        else:
-                                            self.routes[blueprint][node.name]['other_decorators'].append(dec.func.id)
-                                    elif isinstance(dec.func, ast.Attribute):
-                                        self.routes[blueprint][node.name]['other_decorators'].append(dec.func.attr)
-                                elif isinstance(dec, ast.Name):
-                                    self.routes[blueprint][node.name]['other_decorators'].append(dec.id)
-
-                        # get templates served by route, and internal usages of permissionCheck:
-                        for bodyNode in node.body:
-
-                            # check if node is a direct route return.
-                            if isinstance(bodyNode, ast.Return):
-                                if isinstance(bodyNode.value, ast.Call):
-                                    if isinstance(bodyNode.value.func, ast.Name):
-                                        if bodyNode.value.func.id == 'render_template':
-                                            self.routes[blueprint][node.name]['templates'][bodyNode.value.args[0].s] = {}
-
-                            # check if node is an if statement
-                            elif isinstance(bodyNode, ast.If):
-                                permIf = self._if_Parse(bodyNode)
-                                if permIf is not None:
-                                    for element in permIf:
-                                        self.routes[blueprint][node.name]['sub_levels'][element] = permIf[element]
-
-
-                            # otherwise, walk the node looking for ifs and templates.
-                            else:
-                                for subBodyNode in ast.walk(bodyNode):
-                                    # check for more ifs (which would be sublevels) and
-                                    # templates (which would be route level templates)
-                                    if isinstance(bodyNode, ast.Return):
-                                        if isinstance(bodyNode.value, ast.Call):
-                                            if isinstance(bodyNode.value.func, ast.Name):
-                                                if bodyNode.value.func.id == 'render_template':
-                                                    self.routes[blueprint][node.name]['templates'][bodyNode.value.args[0].s] = {}
-
-                                        # check if node is an if statement
-                                    elif isinstance(subBodyNode, ast.If):
-                                        permIf = self._if_Parse(subBodyNode)
-                                        if permIf is not None:
-                                            for element in permIf:
-                                                self.routes[blueprint][node.name]['sub_levels'][element] = permIf[element]
-
-                            self.routes[blueprint][node.name]['sub_levels'] = self._clean_sublevel_dict(self.routes[blueprint][node.name]['sub_levels'])[0]
-
-                            emptySubLevels = []
-
-                            # if subLevel with nothing but templates. And move template up the tree and delete subLevel.
-                            for subLevel in self.routes[blueprint][node.name]['sub_levels']:
-                                if not self.routes[blueprint][node.name]['sub_levels'][subLevel]['permissions'] and not \
-                                 self.routes[blueprint][node.name]['sub_levels'][subLevel]['roles'] and not \
-                                 self.routes[blueprint][node.name]['sub_levels'][subLevel]['sub_levels']:
-                                    emptySubLevels.append(subLevel)
-                                    for template in self.routes[blueprint][node.name]['sub_levels'][subLevel]['templates'].keys():
-
-                                        self.routes[blueprint][node.name]['templates'][template] = {}
-                            for subLevel in emptySubLevels:
-                                del self.routes[blueprint][node.name]['sub_levels'][subLevel]
-
-        self.generic_visit(node)
-
-    def _if_Parse(self, node):
-        # walk the test attribute for permcheck
-        permissions = []
-        roles = {}
-        templates = {}
-        subLevels = {}
-        otherElifs = []
-
-        checkFound = False
-        templateFound = False
-
-        result = {}
-
-        for testNode in ast.walk(node.test): # Get the if statement TEST permissions
-            if isinstance(testNode, ast.Call):
-                if isinstance(testNode.func, ast.Name):
-                    if testNode.func.id == "permissionCheck":
-                        checkFound = True
-                        #found permissionCheck.
-
-                        if node.lineno in self.permChecks.keys():
-                            del self.permChecks[node.lineno]
-
-                        # Get values if declared as args instead of kwargs
-                        if testNode.args:
-                            for perm in testNode.args[0].elts:
-                                permissions.append(perm.s)
-                            if len(testNode.args) > 1:
-                                for role in testNode.args[1].elts:
-                                    roles[role.s] = []
-
-                        # get values if declared as kwargs
-                        for arg in testNode.keywords:
-                            if arg.arg == "permissions":
-                                for perm in arg.value.elts:
-                                    permissions.append(perm.s)
-                            elif arg.arg == "roles":
-                                # ToDo finish roles tree walk
-                                for role in arg.value.elts:
-                                    roles[role.s] = []
-        for bodyNode in node.body:
-            # check for additional if statements
-            if isinstance(bodyNode, ast.If):
-                subIf = self._if_Parse(bodyNode)
-                if subIf is not None:
-                    for element in subIf:
-                        subLevels[element] = subIf[element]
-            # check for template returns
-            elif isinstance(bodyNode, ast.Return):
-                if isinstance(bodyNode.value, ast.Call):
-                    if isinstance(bodyNode.value.func, ast.Name):
-                        if bodyNode.value.func.id == 'render_template':
-                            templateFound = True
-                            templates[bodyNode.value.args[0].s] = {}
-            else:
-                for subBodyNode in ast.walk(bodyNode):
-                    # check for additional if statements
-                    if isinstance(bodyNode, ast.If):
-                        subIf = self._if_Parse(bodyNode)
-                        if subIf is not None:
-                            for element in subIf:
-                                subLevels[element] = subIf[element]
-                    # check for template returns
-                    elif isinstance(bodyNode, ast.Return):
-                        if isinstance(bodyNode.value, ast.Call):
-                            if isinstance(bodyNode.value.func, ast.Name):
-                                if bodyNode.value.func.id == 'render_template':
-                                    templateFound = True
-                                    templates[bodyNode.value.args[0].s] = {}
-
-        for orelseNode in node.orelse:
-            # check for elif statements
-            if isinstance(orelseNode, ast.If):
-                subIf = self._if_Parse(orelseNode)
-                if subIf is not None:
-                    for element in subIf:
-                        otherElifs.append([element, subIf[element]])
-
-            else:  # check for else statements, which would have routes without additional protections.
-                for elseNode in ast.walk(orelseNode): # walk the nodes of the else statement.
-                    if isinstance(orelseNode, ast.If):
-                        subIf = self._if_Parse(orelseNode)
-                        if subIf is not None: #these would be considered on the same level as elifs, so add them to the otherElifs list.
-                            for element in subIf:
-                                otherElifs.append([element, subIf[element]])
-                    # check for template returns
-                    elif isinstance(elseNode, ast.Return):
-                        if isinstance(elseNode.value, ast.Call):
-                            if isinstance(elseNode.value.func, ast.Name):
-                                if elseNode.value.func.id == 'render_template':
-                                    templateFound = True
-                                    templates[elseNode.value.args[0].s] = {}
-
-
-        # before passing up, clean up the sublevel dictionary:
-        subLevels = self._clean_sublevel_dict(subLevels)[0]
-
-        emptySubLevels = []
-
-        # if subLevel with nothing but templates. And move template up the tree and delete subLevel.
-        for subLevel in subLevels:
-            if not subLevels[subLevel]['permissions'] and not subLevels[subLevel]['roles'] and not subLevels[subLevel]['sub_levels']:
-                emptySubLevels.append(subLevel)
-                for template in subLevels[subLevel]['templates'].keys():
-                    templateFound = True
-                    templates[template] = {}
-        for subLevel in emptySubLevels:
-            del subLevels[subLevel]
-
-        if not checkFound and not templateFound and not otherElifs and not subLevels:
-            return None
-
-        result[node.lineno] = {'permissions': permissions, 'roles': roles, 'templates': templates, 'sub_levels': subLevels}
-
-        for otherResult in otherElifs:
-            result[otherResult[0]] = otherResult[1]
-
-        return result
-
-    def _clean_sublevel_dict(self, subLevelDict):
-
-        usedLineNos = set()
-
-        for subLevel in subLevelDict:
-            if subLevelDict[subLevel]['sub_levels']:
-                result = self._clean_sublevel_dict(subLevelDict[subLevel]['sub_levels'])
-                subLevelDict[subLevel]['sub_levels'] = result[0]
-                usedLineNos = usedLineNos.union(result[1])
-
-        for subLevel in usedLineNos:
-            if subLevel in subLevelDict.keys():
-                del subLevelDict[subLevel]
-
-        usedLineNos.add(lineNos for lineNos in subLevelDict.keys())
-
-        return subLevelDict, usedLineNos
-
-
-
-
-    def report(self):
-        pprint(self.stats)
-
-
-if __name__ == "__main__":
-    print('Analyzing project...')
-    pyAnalysis = PyMain(path=os.curdir)
-    pyAnalysis.run()
-    print('Summary of permissioned routes by file/blueprint:')
-    pyAnalysis.printResults()
-
-    jinjaAnalysis = TemplateParser(path=os.curdir)
-    jinjaAnalysis.run()
-    print('Summary of permissioned templates by file/line:')
-    jinjaAnalysis.printResults()
 
 

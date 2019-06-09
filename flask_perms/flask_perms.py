@@ -11,6 +11,6 @@ class flask_perms(object):
 
     def init_app(self, app):
         app.add_template_filter(filters.perm_check)
-
+        app.add_template_filter(filters.is_subset)
 
 
