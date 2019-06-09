@@ -3,7 +3,7 @@ import sys
 
 from flask import current_app, url_for
 
-from site import db
+from testapp import db
 from .mixins.models import Role, Permission, User
 from .settings import ROOT_ROLE, defaultPermissions  # PERMISSION_FILE, ROLE_FILE
 from .parsers import TemplateParser, PyMain

@@ -1,5 +1,5 @@
-from site import create_app, db
-from site.models import User, Role, Permission
+from testapp import create_app, db
+from testapp.models import User, Role, Permission
 
 app = create_app()
 

@@ -1,4 +1,4 @@
-from site import db
+from testapp import db
 
 
 class User(db.Model):
