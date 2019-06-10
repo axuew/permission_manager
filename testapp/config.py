@@ -11,5 +11,4 @@ class Config:
     SECRET_KEY = env.str("FLASK_SECRET_KEY", "placeholderTestingKey1234")
     SQLALCHEMY_DATABASE_URI = 'sqlite:///site.db'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    USER_PRIMARY_KEY = 'id'
-    ROLE_PRIMARY_KEY = 'id'
+

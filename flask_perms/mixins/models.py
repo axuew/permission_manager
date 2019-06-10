@@ -2,6 +2,8 @@ from testapp import db
 from flask import current_app
 from sqlalchemy.ext.declarative import declared_attr
 
+
+
 app_config = current_app.config
 
 user_model = app_config['USER_MODEL_NAME']
@@ -16,18 +18,16 @@ user_table = app_config['USER_TABLE_NAME']
 role_table = app_config['ROLE_TABLE_NAME']
 perm_table = app_config['PERMISSION_TABLE_NAME']
 
-Role = None
-User = None
-Permission = None
+table_dict = {'user': user_table,
+              'role': role_table,
+              'perm': perm_table
+              }
 
-for c in db.Model._decl_class_registry.values():
-    if hasattr(c, '__tablename__'):
-        if c.__tablename__ == user_table:
-            User = c
-        elif c.__tablename__ == role_table:
-            Role = c
-        elif c.__tablename__ == perm_table:
-            Permission = c
+
+def get_model(model):
+    for c in db.Model._decl_class_registry.values():
+        if hasattr(c, '__table__') and c.__tablename__ == table_dict[model]:
+            return c
 
 
 class UserMixinP(db.Model):
@@ -50,6 +50,9 @@ class UserMixinP(db.Model):
         :param roleId:
         :return:
         """
+
+        roleModel = get_model('role')
+
         if role:
             try:
                 tempName = role.name
@@ -58,11 +61,12 @@ class UserMixinP(db.Model):
                 return False, f'{role} is not a valid Role.'
 
         elif roleName:
-            addedRole = Role.query.filter_by(name=roleName).first()
+
+            addedRole = roleModel.query.filter_by(name=roleName).first()
             if not addedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
-            addedRole = Role.query.filter_by(**{role_pk: roleId}).first()
+            addedRole = roleModel.query.filter_by(**{role_pk: roleId}).first()
             if not addedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -79,6 +83,9 @@ class UserMixinP(db.Model):
         return True, f"{addedRole} added to {self}."
 
     def removeRole(self, role=None, roleName=None, roleId=None):
+
+        roleModel = get_model('role')
+
         if role:
             try:
                 tempName = role.name
@@ -87,11 +94,11 @@ class UserMixinP(db.Model):
                 return False, f'{role} is not a valid Role.'
 
         elif roleName:
-            removedRole = Role.query.filter_by(name=roleName).first()
+            removedRole = roleModel.query.filter_by(name=roleName).first()
             if not removedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
-            removedRole = Role.query.filter_by(**{role_pk: roleId}).first()
+            removedRole = roleModel.query.filter_by(**{role_pk: roleId}).first()
             if not removedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -107,7 +114,10 @@ class UserMixinP(db.Model):
         return True, f"{removedRole} removed from {self}. NOTE it may still inherit the Role " \
             f"(or the Role's permissions) through another inherited Role's inherited Roles."
 
-    def addPermission(self, permission=None, permName=None):
+    def addPermission(self, permission=None, permName=None, permId=None):
+
+        permModel = get_model('perm')
+
         if permission:
             try:
                 tempName = permission.name
@@ -115,7 +125,11 @@ class UserMixinP(db.Model):
             except AttributeError:
                 return False, f'{permission} is not a valid Permission.'
         elif permName:
-            addedPerm = Permission.query.filter_by(name=permName).first()
+            addedPerm = permModel.query.filter_by(name=permName).first()
+            if not addedPerm:
+                return False, f'{permName} is not a valid Permission name.'
+        elif permId:
+            addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
             if not addedPerm:
                 return False, f'{permName} is not a valid Permission name.'
 
@@ -128,7 +142,10 @@ class UserMixinP(db.Model):
 
         return True, f'{addedPerm} added to {self}.'
 
-    def removePermission(self, permission=None, permName=None):
+    def removePermission(self, permission=None, permName=None, permId=None):
+
+        permModel = get_model('perm')
+
         if permission:
             try:
                 tempName = permission.name
@@ -136,8 +153,12 @@ class UserMixinP(db.Model):
             except AttributeError:
                 return False, f'{permission} is not a valid Permission.'
         elif permName:
-            removedPerm = Permission.query.filter_by(name=permName).first()
+            removedPerm = permModel.query.filter_by(name=permName).first()
             if not removedPerm:
+                return False, f'{permName} is not a valid Permission name.'
+        elif permId:
+            addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
+            if not addedPerm:
                 return False, f'{permName} is not a valid Permission name.'
 
         if removedPerm not in self.permissions:
@@ -228,6 +249,9 @@ class RoleMixinP(db.Model):
         :param roleId:
         :return:
         """
+
+        roleModel = get_model('role')
+
         if role:
             try:
                 if self.name == role.name:
@@ -238,13 +262,13 @@ class RoleMixinP(db.Model):
         elif roleName:
             if self.name == str(roleName):
                 return False, f'Role cannot inherit itself.'
-            inheritedRole = Role.query.filter_by(name=roleName).first()
+            inheritedRole = roleModel.query.filter_by(name=roleName).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
             if self.id == int(roleId):
                 return False, f'Role cannot inherit itself.'
-            inheritedRole = Role.query.filter_by(**{role_pk: roleId}).first()
+            inheritedRole = roleModel.query.filter_by(**{role_pk: roleId}).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -270,6 +294,9 @@ class RoleMixinP(db.Model):
         :param roleId:
         :return:
         """
+
+        roleModel = get_model('role')
+
         if role:
             try:
                 if self.name == role.name:
@@ -280,13 +307,13 @@ class RoleMixinP(db.Model):
         elif roleName:
             if self.name == str(roleName):
                 return False, f'Role cannot remove itself.'
-            inheritedRole = Role.query.filter_by(name=roleName).first()
+            inheritedRole = roleModel.query.filter_by(name=roleName).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         elif roleId:
             if self.id == int(roleId):
                 return False, f'Role cannot remove itself.'
-            inheritedRole = Role.query.filter_by(**{role_pk: roleId}).first()
+            inheritedRole = roleModel.query.filter_by(**{role_pk: roleId}).first()
             if not inheritedRole:
                 return False, f'{roleName} is not a valid Role name.'
         else:
@@ -305,7 +332,10 @@ class RoleMixinP(db.Model):
             f"NOTE it may still inherit the Role (or the Role's permissions) " \
             f"through another inherited Role's inherited Roles."
 
-    def addPermission(self, permission=None, permName=None):
+    def addPermission(self, permission=None, permName=None, permId=None):
+
+        permModel = get_model('perm')
+
         if permission:
             try:
                 tempName = permission.name
@@ -313,7 +343,11 @@ class RoleMixinP(db.Model):
             except AttributeError:
                 return False, f'{permission} is not a valid Permission.'
         elif permName:
-            addedPerm = Permission.query.filter_by(name=permName).first()
+            addedPerm = permModel.query.filter_by(name=permName).first()
+            if not addedPerm:
+                return False, f'{permName} is not a valid Permission name.'
+        elif permId:
+            addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
             if not addedPerm:
                 return False, f'{permName} is not a valid Permission name.'
 
@@ -326,7 +360,10 @@ class RoleMixinP(db.Model):
 
         return True, f'{addedPerm} added to {self}.'
 
-    def removePermission(self, permission=None, permName=None):
+    def removePermission(self, permission=None, permName=None, permId=None):
+
+        permModel = get_model('perm')
+
         if permission:
             try:
                 tempName = permission.name
@@ -334,8 +371,12 @@ class RoleMixinP(db.Model):
             except AttributeError:
                 return False, f'{permission} is not a valid Permission.'
         elif permName:
-            removedPerm = Permission.query.filter_by(name=permName).first()
+            removedPerm = permModel.query.filter_by(name=permName).first()
             if not removedPerm:
+                return False, f'{permName} is not a valid Permission name.'
+        elif permId:
+            addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
+            if not addedPerm:
                 return False, f'{permName} is not a valid Permission name.'
 
         if removedPerm not in self.permissions:
