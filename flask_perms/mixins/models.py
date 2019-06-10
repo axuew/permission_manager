@@ -2,7 +2,7 @@ from testapp import db
 from flask import current_app
 from sqlalchemy.ext.declarative import declared_attr
 
-
+# app = current_app._get_current_object()
 
 app_config = current_app.config
 
