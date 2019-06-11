@@ -35,6 +35,8 @@ class PermissionManager:
         self.userInfo = {}
         self.roleInfo = {}
 
+        self._good = '['+u'\u221A'+']'
+        self._bad = '['+u'\u04FE'+']'
 
         if path:
             self.path = path
@@ -316,34 +318,31 @@ class PermissionManager:
 
     def report(self):
 
-        good = '[' + u'\u221A' + ']'
-        bad = '[' + u'\u04FE' + ']'
-
         print('Permission report:')
         print('- - - - - - - - - - - - - - - - - - - -')
         if self.missingPerms:
-            print(bad + '--Permissions used in app not found in Permission store--' + bad)
+            print(self._bad + '--Permissions used in app not found in Permission store--' + self._bad)
             for perm in self.missingPerms:
                 print(f'<{perm}> ,', end='')
             print('')
             print('------------------------------------')
         else:
-            print(good + '--All used Permissions declared--' + good)
+            print(self._good + '--All used Permissions declared--' + self._good)
         print('')
         if self.unutilizedPerms:
-            print(bad + '--Unutilized Permissions found in Permission store--' + bad)
+            print(self._bad + '--Unutilized Permissions found in Permission store--' + self._bad)
             for perm in self.unutilizedPerms:
                 print(f'<{perm}> ,', end='')
             print('')
             print('------------------------------------')
         else:
-            print(good + '--All declared Permissions used--' + good)
+            print(self._good + '--All declared Permissions used--' + self._good)
 
         print('')
         print(f'Root Role specified as <{self.rootRole}>')
         root = Role.query.filter_by(name=self.rootRole).first()
         if not root:
-            print(bad + f'--<{self.rootRole}> not found in Role store--' + bad)
+            print(self._bad + f'--<{self.rootRole}> not found in Role store--' + self._bad)
         else:
             if not self.usedPerms.issubset(set(root.allPermissionsRoles()[0])):
                 print(f'!--<{self.rootRole}> missing used Permissions--!')
@@ -352,16 +351,16 @@ class PermissionManager:
                 print('')
                 print('------------------------------------')
             else:
-                print(good + f'--All used Permissions currently assigned to <{self.rootRole}>')
+                print(self._good + f'--All used Permissions currently assigned to <{self.rootRole}>')
             print('')
             if self.dbPermNames - root.allPermissionsRoles()[0]:
-                print(bad + f'--<{self.rootRole}> missing declared db Permissions--!')
+                print(self._bad + f'--<{self.rootRole}> missing declared db Permissions--!')
                 for perm in self.dbPermNames - root.allPermissionsRoles()[0]:
                     print(f'<{perm}> ,', end='')
                 print('')
                 print('------------------------------------')
             else:
-                print(good + f'--All declared Permissions currently assigned to <{self.rootRole}>')
+                print(self._good + f'--All declared Permissions currently assigned to <{self.rootRole}>')
         print('\n')
         print('---Routes with undeclared Permissions---')
 
@@ -379,7 +378,7 @@ class PermissionManager:
                           f'({self.routesByBlueprint[bp][route]["line_number"]}): '
                           f'{set(self.routesByBlueprint[bp][route]["permissions"]) - self.dbPermNames}')
             if bpClean and bpPerm:
-                print('\t' + good + '--All route permissions declared')
+                print('\t' + self._good + '--All route permissions declared')
             elif bpClean:
                 print('\t---No permissions in blueprint')
         print('---------------------------------------')
@@ -424,7 +423,7 @@ class PermissionManager:
                     bpClean = False
                     print(f'\t{route} \t\t\t url {self.appRoutes[bp][route]["url"]}')
             if bpClean:
-                print('\t' + good + '--(All Routes Permissioned)')
+                print('\t' + self._good + '--(All Routes Permissioned)')
         print('---------------------------------------')
         print('\n')
 
@@ -451,11 +450,11 @@ class PermissionManager:
                             print(perm.name, end=", ")
                 print('')
         if noPermedUsers:
-            print(bad + '--No Permissioned Users Found--' + bad)
+            print(self._bad + '--No Permissioned Users Found--' + self._bad)
         if not noPermedUsers:
             print('')
             print('')
-            print(good + "--Use userSummary(id#) to see an individual user's access summary'")
+            print(self._good + "--Use userSummary(id#) to see an individual user's access summary'")
             print('')
         print('---------------------------------------')
         print('\n')
@@ -463,7 +462,7 @@ class PermissionManager:
         if self.roles:
             print('---Declared Roles---')
             for role in self.roles:
-                print(role.name)
+                print(f'({role.id}) ' +  role.name)
                 if role.users:
                     print('   Users:\n\t', end='')
                     for i, user in enumerate(role.users):
@@ -489,11 +488,15 @@ class PermissionManager:
                             print(child.name)
                         else:
                             print(child.name, end=", ")
+                print('')
+                print('')
+                print(self._good + "--Use roleSummary(id#) to see an individual role's access summary'")
+
         else:
-            print(bad + '--No Roles Found in Role Store--' + bad)
+            print(self._bad + '--No Roles Found in Role Store--' + self._bad)
 
-
-
+        print('')
+        print('---------------------------------------')
 
 
         # generate dict permissions with where they're used, set of missing permissions
@@ -609,66 +612,62 @@ class PermissionManager:
                     key, users_with_access?  if a template, add as well.  if sublevels, list 
                     """
 
+    def _printIndent(self, depth):
+        print('\t', end='')
+        for i in range(depth):
+            if i != depth-1:
+                print('\t', end='')
+            else:
+                print('\- - -', end='')
+
+    def _get_subRole(self, parents, depth):
+        for parent in parents:
+            self._printIndent(depth)
+            print(parent)
+            if parent.parents:
+                self._get_subRole(parent.parents, depth + 1)
+
+    def _check_subLevel(self, name, subLevel, permNames):
+        permFound = False
+        subPermFound = False
+        pathThusFar = ''
+        if subLevel['all_permissions']:
+            permFound = True
+            if subLevel['all_permissions'].issubset(permNames):
+                pathThusFar += f" {name}:" + self._good
+            else:
+                pathThusFar += f" {name}:" + self._bad
+
+            if subLevel['sub_levels']:
+                for subLevel2 in subLevel['sub_levels']:
+                    pathThusFarChunk, subPermFound = self._check_subLevel(subLevel2, subLevel[subLevel2], permNames)
+                    pathThusFar += pathThusFarChunk
+        if not permFound and subPermFound:
+            permFound=True
+
+        return pathThusFar, permFound
+
+    def _check_subLevel_blocked(self, name, subLevel, permNames):
+        permFound = False
+        subPermFound = False
+        pathThusFar = ''
+        if subLevel['all_permissions']:
+            permFound = True
+            if subLevel['all_permissions'].issubset(permNames):
+                pathThusFar += f" {name}:[.]"
+            else:
+                pathThusFar += f" {name}:" + self._bad
+
+            if subLevel['sub_levels']:
+                for subLevel2 in subLevel['sub_levels']:
+                    pathThusFarChunk, subPermFound = self._check_subLevel_blocked(subLevel2, subLevel[subLevel2], permNames)
+                    pathThusFar += pathThusFarChunk
+        if not permFound and subPermFound:
+            permFound=True
+
+        return pathThusFar, permFound
+
     def userSummary(self, id):
-
-        good = '['+u'\u221A'+']'
-        bad = '['+u'\u04FE'+']'
-
-        def printIndent(depth):
-            print('\t', end='')
-            for i in range(depth):
-                if i != depth-1:
-                    print('\t', end='')
-                else:
-                    print('\- - -', end='')
-
-        def get_subRole(parents, depth):
-            for parent in parents:
-                printIndent(depth)
-                print(parent)
-                if parent.parents:
-                    get_subRole(parent.parents, depth+1)
-
-        def check_subLevel(name, subLevel):
-            permFound = False
-            subPermFound = False
-            pathThusFar = ''
-            if subLevel['all_permissions']:
-                permFound = True
-                if subLevel['all_permissions'].issubset(permNames):
-                    pathThusFar += f" {name}:" + good
-                else:
-                    pathThusFar += f" {name}:" + bad
-
-                if subLevel['sub_levels']:
-                    for subLevel2 in subLevel['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel(subLevel2, subLevel[subLevel2])
-                        pathThusFar += pathThusFarChunk
-            if not permFound and subPermFound:
-                permFound=True
-
-            return pathThusFar, permFound
-
-        def check_subLevel_blocked(name, subLevel):
-            permFound = False
-            subPermFound = False
-            pathThusFar = ''
-            if subLevel['all_permissions']:
-                permFound = True
-                if subLevel['all_permissions'].issubset(permNames):
-                    pathThusFar += f" {name}:[.]"
-                else:
-                    pathThusFar += f" {name}:" + bad
-
-                if subLevel['sub_levels']:
-                    for subLevel2 in subLevel['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel_blocked(subLevel2, subLevel[subLevel2])
-                        pathThusFar += pathThusFarChunk
-            if not permFound and subPermFound:
-                permFound=True
-
-            return pathThusFar, permFound
-
 
         user = User.query.filter_by(id=id).first()
 
@@ -687,7 +686,6 @@ class PermissionManager:
         for i, role in enumerate(inheritedRoles):
             inheritedRoles[i] = Role.query.filter_by(name=role).first()
 
-
         print(f'{user} Summary:')
         print('=========================')
         print('Role Tree:')
@@ -696,7 +694,7 @@ class PermissionManager:
             depth = 0
             print(role)
             if role.parents:
-                get_subRole(role.parents, depth+1)
+                self._get_subRole(role.parents, depth+1)
         if not userRoles:
             print('No assigned roles')
         print('- - - - -')
@@ -730,13 +728,13 @@ class PermissionManager:
                     # accessible route.
                     if self.routesByBlueprint[bp][route]['all_permissions']:
                         permFound=True
-                        pathThusFar = '\t'+good+f'{route}'
+                        pathThusFar = '\t'+self._good+f'{route}'
                     else:
                         pathThusFar = f'\t[_]{route}'
                     if self.routesByBlueprint[bp][route]['sub_levels']:
                         pathThusFar += ": "
                     for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel])
+                        pathThusFarChunk, subPermFound = self._check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel], permNames)
                         pathThusFar += pathThusFarChunk
                     if permFound:
                         printBuffer.append(pathThusFar)
@@ -760,13 +758,13 @@ class PermissionManager:
                     if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
                         pathThusFar = f'\t[.]{route}'
                     else:
-                        pathThusFar = '\t' + bad + f'{route}'
+                        pathThusFar = '\t' + self._bad + f'{route}'
                 else:
                     pathThusFar = f'\t[ ]{route}'
                 if self.routesByBlueprint[bp][route]['sub_levels']:
                     pathThusFar += ": "
                 for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                    pathThusFarChunk, subPermFound = check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel])
+                    pathThusFarChunk, subPermFound = self._check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel], permNames)
                     pathThusFar += pathThusFarChunk
                     if not permFound and subPermFound:
                         permFound = True
@@ -780,65 +778,6 @@ class PermissionManager:
         print('- - - - -')
 
     def roleSummary(self, id):
-
-        good = '['+u'\u221A'+']'
-        bad = '['+u'\u04FE'+']'
-
-        def printIndent(depth):
-            print('\t', end='')
-            for i in range(depth):
-                if i != depth-1:
-                    print('\t', end='')
-                else:
-                    print('\- - -', end='')
-
-        def get_subRole(parents, depth):
-            for parent in parents:
-                printIndent(depth)
-                print(parent)
-                if parent.parents:
-                    get_subRole(parent.parents, depth+1)
-
-        def check_subLevel(name, subLevel):
-            permFound = False
-            subPermFound = False
-            pathThusFar = ''
-            if subLevel['all_permissions']:
-                permFound = True
-                if subLevel['all_permissions'].issubset(permNames):
-                    pathThusFar += f" {name}:" + good
-                else:
-                    pathThusFar += f" {name}:" + bad
-
-                if subLevel['sub_levels']:
-                    for subLevel2 in subLevel['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel(subLevel2, subLevel[subLevel2])
-                        pathThusFar += pathThusFarChunk
-            if not permFound and subPermFound:
-                permFound=True
-
-            return pathThusFar, permFound
-
-        def check_subLevel_blocked(name, subLevel):
-            permFound = False
-            subPermFound = False
-            pathThusFar = ''
-            if subLevel['all_permissions']:
-                permFound = True
-                if subLevel['all_permissions'].issubset(permNames):
-                    pathThusFar += f" {name}:[.]"
-                else:
-                    pathThusFar += f" {name}:" + bad
-
-                if subLevel['sub_levels']:
-                    for subLevel2 in subLevel['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel_blocked(subLevel2, subLevel[subLevel2])
-                        pathThusFar += pathThusFarChunk
-            if not permFound and subPermFound:
-                permFound=True
-
-            return pathThusFar, permFound
-
 
         role = Role.query.filter_by(id=id).first()
 
@@ -855,12 +794,10 @@ class PermissionManager:
             if parentRole.name in inheritedRoles:
                 inheritedRoles.remove(parentRole.name)
 
-
         for i, perm in enumerate(rolePerms):
             rolePerms[i] = Permission.query.filter_by(name=perm).first()
         for i, subRole in enumerate(inheritedRoles):
             inheritedRoles[i] = Role.query.filter_by(name=subRole).first()
-
 
         print(f'{role} Summary:')
         print('=========================')
@@ -870,7 +807,7 @@ class PermissionManager:
             depth = 0
             print(parentRole)
             if parentRole.parents:
-                get_subRole(parentRole.parents, depth+1)
+                self._get_subRole(parentRole.parents, depth+1)
         if not parentRoles:
             print('No assigned roles')
         print('- - - - -')
@@ -904,13 +841,13 @@ class PermissionManager:
                     # accessible route.
                     if self.routesByBlueprint[bp][route]['all_permissions']:
                         permFound=True
-                        pathThusFar = '\t'+good+f'{route}'
+                        pathThusFar = '\t'+self._good+f'{route}'
                     else:
                         pathThusFar = f'\t[_]{route}'
                     if self.routesByBlueprint[bp][route]['sub_levels']:
                         pathThusFar += ": "
                     for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                        pathThusFarChunk, subPermFound = check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel])
+                        pathThusFarChunk, subPermFound = self._check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel], permNames)
                         pathThusFar += pathThusFarChunk
                     if permFound:
                         printBuffer.append(pathThusFar)
@@ -934,13 +871,13 @@ class PermissionManager:
                     if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
                         pathThusFar = f'\t[.]{route}'
                     else:
-                        pathThusFar = '\t' + bad + f'{route}'
+                        pathThusFar = '\t' + self._bad + f'{route}'
                 else:
                     pathThusFar = f'\t[ ]{route}'
                 if self.routesByBlueprint[bp][route]['sub_levels']:
                     pathThusFar += ": "
                 for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                    pathThusFarChunk, subPermFound = check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel])
+                    pathThusFarChunk, subPermFound = self._check_subLevel(subLevel, self.routesByBlueprint[bp][route]['sub_levels'][subLevel], permNames)
                     pathThusFar += pathThusFarChunk
                     if not permFound and subPermFound:
                         permFound = True
