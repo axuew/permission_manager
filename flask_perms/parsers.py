@@ -34,6 +34,7 @@ class TemplateParser:
         for i in range(len(self.htmlFiles)):
             jinjaEnv = Environment(autoescape=False, loader=FileSystemLoader(self.roots[i]), trim_blocks=False)
             jinjaEnv.filters['is_subset'] = self.is_subset
+            jinjaEnv.filters['perm_check'] = self.perm_check
             temp_source = jinjaEnv.loader.get_source(jinjaEnv, self.htmlFiles[i])
             self.parsed_content = jinjaEnv.parse(temp_source[0])
 
@@ -55,6 +56,15 @@ class TemplateParser:
 
     @staticmethod
     def is_subset(checkSet, mainSet):
+        checkSet = set(checkSet)
+        mainSet = set(mainSet)
+        if checkSet.issubset(mainSet):
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def perm_check(checkSet, mainSet):
         checkSet = set(checkSet)
         mainSet = set(mainSet)
         if checkSet.issubset(mainSet):
@@ -91,6 +101,18 @@ class _TemplateWalker(visitor.NodeVisitor):
                 self.instances[node.lineno]['permSet'] = node.test.args[0].node.name + '.' + node.test.args[0].attr
                 # print('found!')
                 # print(node.node.items[0].value)
+
+    def visit_CallBlock(self, node):
+        if hasattr(node.call.node, 'name'):
+            if node.call.node.name == 'permissioned':
+                self.instances[node.lineno] = {}
+                self.instances[node.lineno]['permissions'] = []
+                for i, kwarg in enumerate(node.call.kwargs):
+                    if kwarg.key == 'p_list':
+                        for perm in kwarg.value.items:
+                            self.instances[node.lineno]['permissions'].append(perm.value)
+
+
 
 
 class PyMain:

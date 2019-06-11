@@ -18,42 +18,43 @@
 
   {% if span %}
 
-      {% if permlist | is_subset(perm_set) %}
+      {% if p_list | is_subset(perm_set) %}
 
-        caller(class=perm_class, perm_action)
+        {{ caller(class=p_class, action=p_action) }}
 
-      {% elif [VIEW_MISSING_PERMISSION] in is_subset(perm_set) %}
+      {% elif ['view_missing_permissions'] | is_subset(perm_set) %}
 
-        <span tabindex="0" data-toggle="tooltip" title="Insufficient Permissions; requires {{ perm_list }}">
-        caller(class=no_perm_class, perm_action=no_perm_action)
+        <span tabindex="0" data-toggle="tooltip" title="Insufficient Permissions; requires {{ p_list }}">
+        {{ caller(class=np_class, action=np_action) }}
         </span>
 
       {% else %}
 
         <span tabindex="0" data-toggle="tooltip" title="Insufficient permissions">
-        caller(class=no_perm_class, action=no_perm_action)
+        {{ caller(class=np_class, action=np_action) }}
         </span>
 
     	{% endif %}
 
-  {% else %}
+    {% else %}
 
-      {% if permlist | is_subset(perm_set) %}
+      {% if p_list | is_subset(perm_set) %}
 
-        caller(class=perm_class, perm_action, text=perm_text
+        {{ caller(class=p_class, action=p_action, text=p_text) }}
 
-      {% elif [VIEW_MISSING_PERMISSION] in is_subset(perm_set) %}
+      {% elif ['view_missing_permissions'] in is_subset(perm_set) %}
 
 
-        caller(class=no_perm_class, perm_action=no_perm_action, text=no_perm_text+" Requires: "+perm_list)
+        {{ caller(class=np_class, action=np_action, text=np_text+" Requires: "+p_list) }}
 
       {% else %}
 
 
-        caller(class=no_perm_class, action=no_perm_action, text=no_perm_text)
+        {{ caller(class=np_class, action=np_action, text=np_text) }}
 
 
     	{% endif %}
+
   {% endif %}
 {%- endmacro %}
 
