@@ -5,14 +5,14 @@ from .config import Config
 
 
 db = SQLAlchemy()
-permissions = Flask_Perms()
+pm = Flask_Perms()
 
 
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
     db.init_app(app)
-    permissions.init_app(app)
+    pm.init_app(app, db)
 
     from .main import main as main_blueprint
     app.register_blueprint(main_blueprint)

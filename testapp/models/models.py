@@ -1,9 +1,8 @@
-from flask_perms.mixins import RoleMixinP, UserMixinP, PermissionMixinP
 from flask_login import UserMixin
-from testapp import db
+from testapp import db, pm
 
 
-class User(UserMixin, UserMixinP, db.Model):
+class User(UserMixin, pm.UserMixinP, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     email = db.Column(db.String(64), unique=True, index=True)
 
@@ -11,9 +10,9 @@ class User(UserMixin, UserMixinP, db.Model):
         return '<User %r>' % self.email
 
 
-class Role(RoleMixinP, db.Model):
+class Role(pm.RoleMixinP, db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
 
-class Permission(PermissionMixinP, db.Model):
+class Permission(pm.PermissionMixinP, db.Model):
     id = db.Column(db.Integer, primary_key=True)
