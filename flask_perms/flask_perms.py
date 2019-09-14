@@ -4,9 +4,11 @@ import sys
 from sqlalchemy.ext.declarative import declared_attr
 
 from . import filters
-from flask import Blueprint, url_for
+from flask import Blueprint, current_app, _app_ctx_stack, has_app_context
 from .settings import ROOT_ROLE, IGNORE_EMPTY, STORE_TYPE, USER_SCHEMA, defaultPermissions
 from .parsers import TemplateParser, PyMain
+from werkzeug.local import LocalProxy
+
 
 class Flask_Perms(object):
     def __init__(self, app=None, **kwargs):
@@ -17,7 +19,6 @@ class Flask_Perms(object):
             self.init_app(app)
 
     def init_app(self, app, db):
-
         app.config.setdefault('STORE_TYPE', STORE_TYPE)
         self.store_type = app.config['STORE_TYPE']
 
@@ -72,9 +73,10 @@ class Flask_Perms(object):
         self.UserRoleLink = self._createCrossLinkModels(app, db)
         self.app_db = db
 
-        self.permission_manager = self._createManager(app, db)()
+        app.extensions['flask_perms'] = self
 
-        app.flask_perms = self
+    def _get_db(self):
+        return current_app.extensions['sqlalchemy'].db
 
     def _get_model(self, model):
         for c in self.app_db.Model._decl_class_registry.values():
@@ -560,11 +562,8 @@ class Flask_Perms(object):
         return UserPermissionLink, RolePermissionLink, UserRoleLink
 
     def _createManager(self, app, db):
-        print('db', db)
         root_role = app.config['ROOT_ROLE']
-        print('regVals:', list(db.Model._decl_class_registry.values()))
         table_dict = self.table_dict
-        print("tableDict", table_dict)
 
         def get_model(model, db=db):
            for c in db.Model._decl_class_registry.values():
@@ -574,11 +573,6 @@ class Flask_Perms(object):
         User = get_model('user')
         Role = get_model('role')
         Permission = get_model('perm')
-
-        # User = self._get_model('user')
-        # Role = self._get_model('role')
-        # Permission = self._get_model('perm')
-        print('INIT::', User)
 
         class PermissionManager:
 
@@ -1478,3 +1472,19 @@ class Flask_Perms(object):
                 print('- - - - -')
 
         return PermissionManager
+
+    def _update_app_context_with_perm_manager(self):
+        ctx = _app_ctx_stack.top
+        pm = self._createManager(current_app, self._get_db())()
+        pm.init()
+        ctx.perm_manager = pm
+
+
+perm_manager = LocalProxy(lambda: _get_manager())
+
+
+def _get_manager():
+    if has_app_context() and not hasattr(_app_ctx_stack.top, 'perm_manager'):
+        current_app.extensions['flask_perms']._update_app_context_with_perm_manager()
+
+    return getattr(_app_ctx_stack.top, 'perm_manager', None)
