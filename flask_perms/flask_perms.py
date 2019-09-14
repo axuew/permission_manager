@@ -4,7 +4,7 @@ import sys
 from sqlalchemy.ext.declarative import declared_attr
 
 from . import filters
-from flask import Blueprint, current_app, _app_ctx_stack, has_app_context
+from flask import url_for, Blueprint, current_app, _app_ctx_stack, has_app_context
 from .settings import ROOT_ROLE, IGNORE_EMPTY, STORE_TYPE, USER_SCHEMA, defaultPermissions
 from .parsers import TemplateParser, PyMain
 from werkzeug.local import LocalProxy
@@ -612,8 +612,8 @@ class Flask_Perms(object):
                 self.integrateRoutesTemplates()
                 self.remapToBlueprint()
                 # self.addDefaultPermissions()
-                #self.appRouteParse()
-                #self.findUnprotectedRoutes()
+                self.appRouteParse()
+                self.findUnprotectedRoutes()
                 self.check_missing()
 
             def re_init(self):
@@ -655,8 +655,7 @@ class Flask_Perms(object):
                     if template in subLevel['templates']:
                         subLevel['templates'][template] = self.templates[template]
                     for subLevel2 in subLevel['sub_levels']:
-                        subLevel['sub_levels'][subLevel2] = add_template_to_subLevel(subLevel['sub_levels'][subLevel2],
-                                                                                     template)
+                        subLevel['sub_levels'][subLevel2] = add_template_to_subLevel(subLevel['sub_levels'][subLevel2], template)
                     return subLevel
 
                 # Add template declared permissions to usedPerms Set
@@ -676,11 +675,9 @@ class Flask_Perms(object):
                     for file in self.routesByFile:
                         for bp in self.routesByFile[file]:
                             for route in self.routesByFile[file][bp]:
-                                for perm in self.routesByFile[file][bp][route][
-                                    'permissions']:  # add route permissions to usedPerms set
+                                for perm in self.routesByFile[file][bp][route]['permissions']:  # add route permissions to usedPerms set
                                     self.usedPerms.add(perm)
-                                for role in self.routesByFile[file][bp][route][
-                                    'roles']:  # add route permissions to usedPerms set
+                                for role in self.routesByFile[file][bp][route]['roles']:  # add route permissions to usedPerms set
                                     self.usedRoles.add(role)
 
                                 if template in self.routesByFile[file][bp][route]['templates']:
@@ -698,6 +695,7 @@ class Flask_Perms(object):
                                             self.routesByFile[file][bp][route][key]
                                     self.templates[template]['renders'][bp][route]['file'] = file
 
+                                    #ToDo Reactivate this code
                                     """
                                     self.templates[template]['renders'][bp][route]['line_number'] = self.routesByFile[file][bp][route]['line_number']
                                     self.templates[template]['renders'][bp][route]['other_decorators'] = self.routesByFile[file][bp][route]['other_decorators']
@@ -711,19 +709,6 @@ class Flask_Perms(object):
                                     self.routesByFile[file][bp][route]['sub_levels'][
                                         subLevel] = add_template_to_subLevel(
                                         self.routesByFile[file][bp][route]['sub_levels'][subLevel], template)
-
-                """
-                # Generate dict of protected routes by blueprint, remap file to key in each route.
-                for file in pp.output:
-                    for bp in pp.output[file]:
-                        if bp not in self.routesByBlueprint.keys():
-                            self.routesByBlueprint[bp] = {}
-                        for route in pp.output[file][bp]:
-                            if route in self.routesByBlueprint[bp].keys():
-                                raise RuntimeError(f'<{route}> is referenced twice in blueprint {bp}')
-                            self.routesByBlueprint[bp][route] = pp.output[file][bp][route]
-                            self.routesByBlueprint[bp][route]['file'] = file
-                """
 
             def remapToBlueprint(self):
                 self.routesByBlueprint = {}
@@ -767,12 +752,12 @@ class Flask_Perms(object):
                     if len(set(dbPermNameList)) != len(dbPermNameList):
                         raise AssertionError('Permissions with duplicate values exist in Permission store.')
                     self.dbPermNames = set(dbPermNameList)
-            """
+
             def appRouteParse(self):
-                
+                """
                 Parses a dict of all routes in the app. returns {bp: {route: {'protected': None, 'url': route_url_path}
                 :return:
-                
+                """
                 with app.test_request_context():
                     for rule in app.url_map.iter_rules():
                         options = {}
@@ -784,17 +769,18 @@ class Flask_Perms(object):
                         else:
                             bp = 'NONE'
                             route = rule.endpoint
+                        if route == 'static':
+                            continue
                         if bp not in self.appRoutes.keys():
                             self.appRoutes[bp] = {}
                         self.appRoutes[bp][route] = {'protected': None, 'url': url}
-            """
+
             def findUnprotectedRoutes(self):
 
-                # ToDo change this over to include permissions from specified required roles
                 for bp in self.routesByBlueprint:
                     for route in self.routesByBlueprint[bp]:
-                        if self.routesByBlueprint[bp][route]['permissions'] and route in self.appRoutes[bp].keys():
-                            self.appRoutes[bp][route]['protected'] = self.routesByBlueprint[bp][route]['permissions']
+                        if self.routesByBlueprint[bp][route]['all_permissions'] and route in self.appRoutes[bp].keys():
+                            self.appRoutes[bp][route]['protected'] = self.routesByBlueprint[bp][route]['all_permissions']
 
             def check_missing(self):
                 self.missingPerms = self.usedPerms - self.dbPermNames
@@ -803,9 +789,9 @@ class Flask_Perms(object):
 
             def addRolePerms(self):
                 """
-                add role based permissions to routesByFile dict., and generate 'all_permissions' key containing set of
+                add role based permissions to routesByFile dict, and generate 'all_permissions' key containing set of
                 permission derived from permission list and roles.
-                Also, generates a traceback of templates by way of bp/route/ifstatemtns that
+                Also, generates a traceback of templates by way of bp/route/if-statements that
                 :return:
                 """
 
@@ -968,8 +954,7 @@ class Flask_Perms(object):
                                 print(f', {render}', end="")
                         print("")
                         for i, usage in enumerate(self.templates[template]['uses']):
-                            if not set(self.templates[template]['uses'][usage]['permissions']).issubset(
-                                    self.dbPermNames):
+                            if not set(self.templates[template]['uses'][usage]['permissions']).issubset(self.dbPermNames):
                                 if i == 0:
                                     print(f"\t{usage}: {set(self.templates[template]['uses'][usage]['permissions']) - self.dbPermNames})")
                                 else:
@@ -1055,8 +1040,8 @@ class Flask_Perms(object):
                                 else:
                                     print(child.name, end=", ")
                         print('')
-                        print('')
-                        print(self._good + "--Use roleSummary(id#) to see an individual role's access summary'")
+                    print('')
+                    print(self._good + "--Use roleSummary(id#) to see an individual role's access summary'")
 
                 else:
                     print(self._bad + '--No Roles Found in Role Store--' + self._bad)
@@ -1115,7 +1100,7 @@ class Flask_Perms(object):
                 if self.rootRole not in self.roleNames:
                     print(f'Specified root Role <{self.rootRole}> not found in Role store; generating new role.')
                     rootRole = Role(name=self.rootRole, description=f"{self.rootRole} role.  Has all permissions. "
-                    f" Should be considered as root.")
+                                                                    f" Should be considered as root.")
                 else:
                     rootRole = Role.query.filter_by(name=self.rootRole).first()
 
@@ -1206,8 +1191,7 @@ class Flask_Perms(object):
 
                     if subLevel['sub_levels']:
                         for subLevel2 in subLevel['sub_levels']:
-                            pathThusFarChunk, subPermFound = self._check_subLevel(subLevel2, subLevel[subLevel2],
-                                                                                  permNames)
+                            pathThusFarChunk, subPermFound = self._check_subLevel(subLevel2, subLevel[subLevel2], permNames)
                             pathThusFar += pathThusFarChunk
                 if not permFound and subPermFound:
                     permFound = True
@@ -1235,6 +1219,158 @@ class Flask_Perms(object):
                     permFound = True
 
                 return pathThusFar, permFound
+
+            def _printPermissionAccessibleRoutes(self, permNameSet):
+                print('Accessible permissioned routes:')
+                print('- - - - -')
+                for bp in self.routesByBlueprint:
+                    bpPermFound = False
+                    printBuffer = []
+                    for route in self.routesByBlueprint[bp]:
+                        permFound = False
+                        if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNameSet):
+                            # accessible route.
+                            if self.routesByBlueprint[bp][route]['all_permissions']:
+                                permFound = True
+                                pathThusFar = '\t' + self._good + f'{route}'
+                            else:
+                                pathThusFar = f'\t[_]{route}'
+                            if self.routesByBlueprint[bp][route]['sub_levels']:
+                                pathThusFar += ": "
+                            for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
+                                pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
+                                                                                      self.routesByBlueprint[bp][route][
+                                                                                          'sub_levels'][subLevel],
+                                                                                      permNameSet)
+                                pathThusFar += pathThusFarChunk
+                            if permFound:
+                                printBuffer.append(pathThusFar)
+                                bpPermFound = True
+                    if bpPermFound:
+                        print(bp + ':')
+                        for line in printBuffer:
+                            print(line)
+                print('- - - - -')
+
+            def _printBlockedRoutes(self, permNameSet):
+                print('Blocked routes:')
+                print('- - - - -')
+                for bp in self.routesByBlueprint:
+                    bpPermFound = False
+                    printBuffer = []
+                    for route in self.routesByBlueprint[bp]:
+                        permFound = False
+                        if self.routesByBlueprint[bp][route]['all_permissions']:
+                            permFound = True
+                            if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNameSet):
+                                pathThusFar = f'\t[.]{route}'
+                            else:
+                                pathThusFar = '\t' + self._bad + f'{route}'
+                        else:
+                            pathThusFar = f'\t[ ]{route}'
+                        if self.routesByBlueprint[bp][route]['sub_levels']:
+                            pathThusFar += ": "
+                        for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
+                            pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
+                                                                                  self.routesByBlueprint[bp][route][
+                                                                                      'sub_levels'][subLevel],
+                                                                                  permNameSet)
+                            pathThusFar += pathThusFarChunk
+                            if not permFound and subPermFound:
+                                permFound = True
+                        if permFound:
+                            printBuffer.append(pathThusFar)
+                            bpPermFound = True
+                    if bpPermFound:
+                        print(bp + ':')
+                        for line in printBuffer:
+                            print(line)
+                print('- - - - -')
+
+            def _parse_template_access(self, subLevelNum, subLevel, accessibleTemplates, permNames, pathBuffer):
+                if set(subLevel['all_permissions']).issubset(permNames):
+                    pathBuffer.append(f"->{subLevelNum}")
+                    if subLevel['templates']:
+                        for template in subLevel['templates']:
+                            if subLevel['all_permissions'] or 'uses' in subLevel['templates'][template].keys() and \
+                                    subLevel['templates'][template]['uses']:
+                                if template not in accessibleTemplates.keys():
+                                    accessibleTemplates[template] = {'uses': {}, 'paths': []}
+                                    accessibleTemplates[template]['paths'].append(pathBuffer)
+                                    if 'uses' in subLevel['templates'][template].keys():
+                                        for use in subLevel['templates'][template]['uses']:
+                                            accessibleTemplates[template]['uses'][use] = \
+                                                set(subLevel['templates'][template]['uses'][use][
+                                                        'permissions']).issubset(permNames)
+
+                    for subLevel2 in subLevel['sub_levels']:
+                        accessibleTemplates = self._parse_template_access(subLevel2,
+                                                                          subLevel['sub_levels'][subLevel],
+                                                                          accessibleTemplates,
+                                                                          permNames,
+                                                                          pathBuffer)
+                return accessibleTemplates
+
+            def _templateAccessSummary(self, permNameSet):
+                accessibleTemplates = {}
+                """
+                show traceback route for templates. for templates that have access, show on page use access. use permNames.
+                """
+                # Generate the template access summary
+                for bp in self.routesByBlueprint:
+                    for route in self.routesByBlueprint[bp]:
+                        pathBuffer = []
+                        if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNameSet):
+                            pathBuffer.append(f"{bp}->{route}")
+                            if self.routesByBlueprint[bp][route]['templates']:
+                                for template in self.routesByBlueprint[bp][route]['templates']:
+                                    if self.routesByBlueprint[bp][route]['all_permissions'] or \
+                                      'uses' in self.routesByBlueprint[bp][route]['templates'][template].keys() and \
+                                      self.routesByBlueprint[bp][route]['templates'][template]['uses']:
+                                        if template not in accessibleTemplates.keys():
+                                            accessibleTemplates[template] = {'uses': {}, 'paths': []}
+                                            accessibleTemplates[template]['paths'].append(pathBuffer)
+                                            if 'uses' in self.routesByBlueprint[bp][route]['templates'][template].keys():
+                                                for use in self.routesByBlueprint[bp][route]['templates'][template]['uses']:
+                                                    accessibleTemplates[template]['uses'][use] = \
+                                                        set(self.routesByBlueprint[bp][route]['templates']
+                                                            [template]['uses'][use]['permissions']).issubset(permNameSet)
+
+                            for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
+                                accessibleTemplates = \
+                                    self._parse_template_access(subLevel,
+                                                                self.routesByBlueprint[bp][route]['sub_levels'][subLevel],
+                                                                accessibleTemplates,
+                                                                permNameSet,
+                                                                pathBuffer
+                                                                )
+                return accessibleTemplates
+
+            def _printTemplateAccess(self, accessibleTemplates):
+                print('Permission Controlled Template Access Paths:')
+                print('- - - - -')
+                """
+                show traceback route for templates. for templates that have access, show on page use access. use permNames.
+                """
+
+                # Now, print the template access summary
+                for template in accessibleTemplates:
+                    print(template)
+                    if accessibleTemplates[template]['uses']:
+                        print('\tOn-Page Access: ', end='')
+                        for i, use in enumerate(accessibleTemplates[template]['uses']):
+                            if accessibleTemplates[template]['uses'][use]:
+                                print(f'{self._good}:{use}', end='')
+                            else:
+                                print(f'{self._bad}:{use}', end='')
+                            if i + 1 < len(accessibleTemplates[template]['uses']):
+                                print(', ', end='')
+                        print()
+                    print('\tAccess Paths:')
+                    for path in accessibleTemplates[template]['paths']:
+                        print(f'\t\t{path}')
+                    print()
+                print('- - - - -')
 
             def userSummary(self, id):
 
@@ -1286,71 +1422,12 @@ class Flask_Perms(object):
                     print('')
                 print('- - - - -')
                 print('\n')
-                print('Accessible permissioned routes:')
-                print('- - - - -')
-                for bp in self.routesByBlueprint:
-                    bpPermFound = False
-                    printBuffer = []
-                    for route in self.routesByBlueprint[bp]:
-                        permFound = False
-                        if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
-                            # accessible route.
-                            if self.routesByBlueprint[bp][route]['all_permissions']:
-                                permFound = True
-                                pathThusFar = '\t' + self._good + f'{route}'
-                            else:
-                                pathThusFar = f'\t[_]{route}'
-                            if self.routesByBlueprint[bp][route]['sub_levels']:
-                                pathThusFar += ": "
-                            for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                                pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
-                                                                                      self.routesByBlueprint[bp][route][
-                                                                                          'sub_levels'][subLevel],
-                                                                                      permNames)
-                                pathThusFar += pathThusFarChunk
-                            if permFound:
-                                printBuffer.append(pathThusFar)
-                                bpPermFound = True
-                    if bpPermFound:
-                        print(bp + ':')
-                        for line in printBuffer:
-                            print(line)
-
-                print('- - - - -')
+                self._printPermissionAccessibleRoutes(permNames)
                 print('\n')
-                print('Blocked routes:')
-                print('- - - - -')
-                for bp in self.routesByBlueprint:
-                    bpPermFound = False
-                    printBuffer = []
-                    for route in self.routesByBlueprint[bp]:
-                        permFound = False
-                        if self.routesByBlueprint[bp][route]['all_permissions']:
-                            permFound = True
-                            if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
-                                pathThusFar = f'\t[.]{route}'
-                            else:
-                                pathThusFar = '\t' + self._bad + f'{route}'
-                        else:
-                            pathThusFar = f'\t[ ]{route}'
-                        if self.routesByBlueprint[bp][route]['sub_levels']:
-                            pathThusFar += ": "
-                        for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                            pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
-                                                                                  self.routesByBlueprint[bp][route][
-                                                                                      'sub_levels'][subLevel],
-                                                                                  permNames)
-                            pathThusFar += pathThusFarChunk
-                            if not permFound and subPermFound:
-                                permFound = True
-                        if permFound:
-                            printBuffer.append(pathThusFar)
-                            bpPermFound = True
-                    if bpPermFound:
-                        print(bp + ':')
-                        for line in printBuffer:
-                            print(line)
-                print('- - - - -')
+                self._printBlockedRoutes(permNames)
+                print('\n')
+                self._printTemplateAccess(self._templateAccessSummary(permNames))
+                print('\n')
 
             def roleSummary(self, id):
 
@@ -1405,71 +1482,12 @@ class Flask_Perms(object):
                     print('')
                 print('- - - - -')
                 print('\n')
-                print('Accessible permissioned routes:')
-                print('- - - - -')
-                for bp in self.routesByBlueprint:
-                    bpPermFound = False
-                    printBuffer = []
-                    for route in self.routesByBlueprint[bp]:
-                        permFound = False
-                        if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
-                            # accessible route.
-                            if self.routesByBlueprint[bp][route]['all_permissions']:
-                                permFound = True
-                                pathThusFar = '\t' + self._good + f'{route}'
-                            else:
-                                pathThusFar = f'\t[_]{route}'
-                            if self.routesByBlueprint[bp][route]['sub_levels']:
-                                pathThusFar += ": "
-                            for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                                pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
-                                                                                      self.routesByBlueprint[bp][route][
-                                                                                          'sub_levels'][subLevel],
-                                                                                      permNames)
-                                pathThusFar += pathThusFarChunk
-                            if permFound:
-                                printBuffer.append(pathThusFar)
-                                bpPermFound = True
-                    if bpPermFound:
-                        print(bp + ':')
-                        for line in printBuffer:
-                            print(line)
-
-                print('- - - - -')
+                self._printPermissionAccessibleRoutes(permNames)
                 print('\n')
-                print('Blocked routes:')
-                print('- - - - -')
-                for bp in self.routesByBlueprint:
-                    bpPermFound = False
-                    printBuffer = []
-                    for route in self.routesByBlueprint[bp]:
-                        permFound = False
-                        if self.routesByBlueprint[bp][route]['all_permissions']:
-                            permFound = True
-                            if self.routesByBlueprint[bp][route]['all_permissions'].issubset(permNames):
-                                pathThusFar = f'\t[.]{route}'
-                            else:
-                                pathThusFar = '\t' + self._bad + f'{route}'
-                        else:
-                            pathThusFar = f'\t[ ]{route}'
-                        if self.routesByBlueprint[bp][route]['sub_levels']:
-                            pathThusFar += ": "
-                        for subLevel in self.routesByBlueprint[bp][route]['sub_levels']:
-                            pathThusFarChunk, subPermFound = self._check_subLevel(subLevel,
-                                                                                  self.routesByBlueprint[bp][route][
-                                                                                      'sub_levels'][subLevel],
-                                                                                  permNames)
-                            pathThusFar += pathThusFarChunk
-                            if not permFound and subPermFound:
-                                permFound = True
-                        if permFound:
-                            printBuffer.append(pathThusFar)
-                            bpPermFound = True
-                    if bpPermFound:
-                        print(bp + ':')
-                        for line in printBuffer:
-                            print(line)
-                print('- - - - -')
+                self._printBlockedRoutes(permNames)
+                print('\n')
+                self._printTemplateAccess(self._templateAccessSummary(permNames))
+                print('\n')
 
         return PermissionManager
 
