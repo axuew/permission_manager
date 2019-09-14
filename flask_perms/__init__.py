@@ -1,1 +1,2 @@
 from flask_perms.flask_perms import Flask_Perms
+from flask_perms.flask_perms import perm_manager
