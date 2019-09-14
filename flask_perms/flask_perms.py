@@ -70,13 +70,14 @@ class Flask_Perms(object):
         self.UserPermissionLink, \
         self.RolePermissionLink, \
         self.UserRoleLink = self._createCrossLinkModels(app, db)
+        self.app_db = db
 
-        self.PermissionManager = self._createManager(app, db)
+        self.permission_manager = self._createManager(app, db)()
 
         app.flask_perms = self
 
-    def _get_model(self, model, db):
-        for c in db.Model._decl_class_registry.values():
+    def _get_model(self, model):
+        for c in self.app_db.Model._decl_class_registry.values():
             if hasattr(c, '__table__') and c.__tablename__ == self.table_dict[model]:
                 return c
 
@@ -559,21 +560,28 @@ class Flask_Perms(object):
         return UserPermissionLink, RolePermissionLink, UserRoleLink
 
     def _createManager(self, app, db):
-
+        print('db', db)
         root_role = app.config['ROOT_ROLE']
-
+        print('regVals:', list(db.Model._decl_class_registry.values()))
         table_dict = self.table_dict
+        print("tableDict", table_dict)
 
         def get_model(model, db=db):
-            for c in db.Model._decl_class_registry.values():
-                if hasattr(c, '__table__') and c.__tablename__ == table_dict[model]:
-                    return c
+           for c in db.Model._decl_class_registry.values():
+               if hasattr(c, '__table__') and c.__tablename__ == table_dict[model]:
+                   return c
 
         User = get_model('user')
         Role = get_model('role')
         Permission = get_model('perm')
 
+        # User = self._get_model('user')
+        # Role = self._get_model('role')
+        # Permission = self._get_model('perm')
+        print('INIT::', User)
+
         class PermissionManager:
+
             def __init__(self, path=app.root_path, rootRole=root_role):
                 self.templates = {}  # Raw Template Dict, organized by html
                 self.routesByFile = {}  # Raw Code Dict, organized by python file.
@@ -611,7 +619,7 @@ class Flask_Perms(object):
                 self.remapToBlueprint()
                 # self.addDefaultPermissions()
                 #self.appRouteParse()
-                self.findUnprotectedRoutes()
+                #self.findUnprotectedRoutes()
                 self.check_missing()
 
             def re_init(self):
