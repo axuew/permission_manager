@@ -1,8 +1,11 @@
 import os
 import sys
 import ast
+import inspect
+import importlib.util
 
 from flask import current_app
+from flask.views import View
 from pprint import pprint
 from jinja2 import Environment, FileSystemLoader, meta, visitor
 
@@ -143,7 +146,7 @@ class PyMain:
 
                 permCheckAnalyzer = PermCheckAnalyzer()
 
-                routeAnalyzer = RouteAnalyzer(permCheckAnalyzer.permChecks)
+                routeAnalyzer = RouteAnalyzer(file, permCheckAnalyzer.permChecks)
                 routeAnalyzer.visit(tree)
                 if routeAnalyzer.routes:
                     self.output[os.path.relpath(file, self.path)] = routeAnalyzer.routes
@@ -195,11 +198,30 @@ class PermCheckAnalyzer(ast.NodeVisitor):
 
 
 class RouteAnalyzer(ast.NodeVisitor):
-    def __init__(self, permCheckDict):
-        self.routes = {} # the parsed routing tree.
+    def __init__(self, file, permCheckDict):
+        self.file = file
+        self.routes = {}  # the parsed routing tree.
         self.permChecks = permCheckDict  # Before analysis, holds the passed in dict of all permissionCheck instances.
                                          # after analysis, this holds a dict of permission checks run outside of a
                                          # route context.
+        self.classRoutes = []
+
+    def visit_ClassDef(self, node):
+        """
+        Temporarily import the node's module, and get the class inheritance tree.  check if it is a descendent of a
+        werkzeug View class.
+        """
+        tempImportString = '.'.join(os.path.relpath(self.file, os.getcwd()).split('\\'))[:-3]
+
+        spec = importlib.util.spec_from_file_location(tempImportString, self.file)
+        tempModule = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tempModule)
+        tempClass = getattr(tempModule, node.name)
+
+        inheritanceTree = inspect.getmro(tempClass)
+
+        if View in inheritanceTree:
+            self.classRoutes.append(node)
 
     def visit_FunctionDef(self, node):
         # Finds all routes.
@@ -209,7 +231,7 @@ class RouteAnalyzer(ast.NodeVisitor):
                 if isinstance(node.decorator_list[0].func, ast.Attribute):
                     if node.decorator_list[0].func.attr == 'route':
                         # found a route declaration
-                        blueprint = node.decorator_list[0].func.value.id # will just be 'app' if not a blueprint
+                        blueprint = node.decorator_list[0].func.value.id  # will just be 'app' if not a blueprint
 
                         # if the blueprint hasn't been seen yet, save to dict
                         if blueprint not in self.routes.keys():
