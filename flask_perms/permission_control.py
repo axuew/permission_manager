@@ -17,7 +17,7 @@ def permissionCheck(permissions=None, roles=None, user=current_user, permSet=Non
                 the default 'view_missing_permissions' permission, a list of permission names they are missing from the
                 check.
     """
-    Role = current_app.flask_perms._get_model('role')
+    Role = current_app.extensions['flask_perms']._get_model('role')
     requiredPermissions = set()
 
     if user and permSet:
@@ -72,7 +72,7 @@ def permission_required(permissions=None, roles=None, hide=False):
     def decorator(f):
         @wraps(f)
         def decorated_function(*args, **kwargs):
-            Role = current_app.flask_perms._get_model('role')
+            Role = current_app.extensions['flask_perms']._get_model('role')
             # get all required permissions
             if current_user.is_authenticated:
 
@@ -126,7 +126,7 @@ def bp_permission_required(permissions=None, roles=None, hide='', func=None):
 
     @wraps(func)
     def decorated_function(*args, **kwargs):
-        Role = current_app.flask_perms._get_model('role')
+        Role = current_app.extensions['flask_perms']._get_model('role')
         if current_user and current_user.is_authenticated:
             if not permissions and not roles:
                 raise ValueError('A bp_permission_required decorator is missing any permissions or roles')

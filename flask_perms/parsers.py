@@ -161,8 +161,6 @@ class PyMain:
         return permList
 
 
-
-
 class PermCheckAnalyzer(ast.NodeVisitor):
     def __init__(self):
         self.permChecks = {}
@@ -196,7 +194,7 @@ class PermCheckAnalyzer(ast.NodeVisitor):
 
 class RouteAnalyzer(ast.NodeVisitor):
     def __init__(self, permCheckDict):
-        self.routes = {} # the parsed routing tree.
+        self.routes = {}  # the parsed routing tree.
         self.permChecks = permCheckDict  # Before analysis, holds the passed in dict of all permissionCheck instances.
                                          # after analysis, this holds a dict of permission checks run outside of a
                                          # route context.
@@ -209,7 +207,7 @@ class RouteAnalyzer(ast.NodeVisitor):
                 if isinstance(node.decorator_list[0].func, ast.Attribute):
                     if node.decorator_list[0].func.attr == 'route':
                         # found a route declaration
-                        blueprint = node.decorator_list[0].func.value.id # will just be 'app' if not a blueprint
+                        blueprint = node.decorator_list[0].func.value.id  # will just be 'app' if not a blueprint
 
                         # if the blueprint hasn't been seen yet, save to dict
                         if blueprint not in self.routes.keys():
