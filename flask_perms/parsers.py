@@ -133,6 +133,9 @@ class PyMain:
     def run(self):
         self.output = {}
         self.pyFiles = []
+
+        self._parse_views_rules()
+
         for root, dirs, files in os.walk(self.path):
             for file in files:
                 if file.endswith(".py"):
@@ -146,11 +149,71 @@ class PyMain:
 
                 permCheckAnalyzer = PermCheckAnalyzer()
 
-                routeAnalyzer = RouteAnalyzer(file, permCheckAnalyzer.permChecks)
+                routeAnalyzer = RouteAnalyzer(file, permCheckAnalyzer.permChecks, self.views)
                 routeAnalyzer.visit(tree)
                 if routeAnalyzer.routes:
                     self.output[os.path.relpath(file, self.path)] = routeAnalyzer.routes
                     self.permChecks = routeAnalyzer.permChecks
+
+    def _parse_views_rules(self):
+        """
+        Populates a dictionary of the current_app's registered views.  Separate into class and function based views.
+        {'classes': {'<CLASSNAME>': {'rules': ['/index', '/api/test/', etc],
+                                     'endpoint': '<ENDPOINT (main.index)>',
+                                     'methods': '<METHOD_SET (GET, POST, etc)>',
+                                     'blueprint': ''
+                                     }
+                     }
+         'funcs' {'<CLASSNAME>': {'rules': ['/index', '/api/test/', etc],
+                                  'endpoint': '<ENDPOINT (main.index)>',
+                                  'methods': '<METHOD_SET (GET, POST, etc)>',
+                                  'blueprint': ''
+                                 }
+                 }
+        }
+
+        :return:
+        """
+        # stored as endpoint: {'rules': [], 'obj_name': ''}
+        self.views = {'funcs': {},
+                      'classes': {}
+                      }
+
+        # Iterate through the current app view functions
+        for endpoint, viewFunc in current_app.view_functions.items():
+            if len(endpoint.split('.')) > 1:
+                blueprint = endpoint.split('.')[0]
+            else:
+                blueprint = 'NONE'
+
+            if endpoint == 'static':
+                continue  # Skip the static folder.
+
+            elif 'view_class' in viewFunc.__dict__:
+                # Found a class-based route
+                className = viewFunc.__dict__['view_class'].__name__ # Gets the actual class name
+                self.views['classes'][className] = {'rules': [],
+                                                    'endpoint': endpoint.split('.')[-1],
+                                                    'methods': viewFunc.__dict__['methods'],
+                                                    'blueprint': blueprint
+                                                    }
+            else:
+                # found a function-based route.
+                funcName = viewFunc.__name__
+                self.views['funcs'][funcName] = {'rules': [],
+                                                 'endpoint': endpoint.split('.')[-1],
+                                                 'blueprint': blueprint
+                                                 }
+
+        # Iterate over the current app rule set
+        for rule in current_app.url_map._rules:
+            if rule.endpoint in self.views['funcs']:
+                self.views['funcs'][rule.endpoint]['methods'] = rule.methods
+                self.views['funcs'][rule.endpoint]['rules'].append(rule.rule)
+            else:
+                for classView in self.views['classes']:
+                    if rule.endpoint == self.views['classes'][classView]['endpoint']:
+                        self.views['classes'][classView]['rules'].append(rule.rule)
 
     def printResults(self):
         pprint(self.output)
@@ -198,8 +261,9 @@ class PermCheckAnalyzer(ast.NodeVisitor):
 
 
 class RouteAnalyzer(ast.NodeVisitor):
-    def __init__(self, file, permCheckDict):
+    def __init__(self, file, permCheckDict, appViews=None):
         self.file = file
+        self.appViews = appViews
         self.routes = {}  # the parsed routing tree.
         self.permChecks = permCheckDict  # Before analysis, holds the passed in dict of all permissionCheck instances.
                                          # after analysis, this holds a dict of permission checks run outside of a
@@ -211,17 +275,19 @@ class RouteAnalyzer(ast.NodeVisitor):
         Temporarily import the node's module, and get the class inheritance tree.  check if it is a descendent of a
         werkzeug View class.
         """
-        tempImportString = '.'.join(os.path.relpath(self.file, os.getcwd()).split('\\'))[:-3]
 
-        spec = importlib.util.spec_from_file_location(tempImportString, self.file)
-        tempModule = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(tempModule)
-        tempClass = getattr(tempModule, node.name)
+        if node.name in self.appViews['classes']:
+            tempImportString = '.'.join(os.path.relpath(self.file, os.getcwd()).split('\\'))[:-3]
 
-        inheritanceTree = inspect.getmro(tempClass)
+            spec = importlib.util.spec_from_file_location(tempImportString, self.file)
+            tempModule = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(tempModule)
+            tempClass = getattr(tempModule, node.name)
 
-        if View in inheritanceTree:
-            self.classRoutes.append(node)
+            inheritanceTree = inspect.getmro(tempClass)
+
+            if View in inheritanceTree:
+                self.classRoutes.append(node)
 
     def visit_FunctionDef(self, node):
         # Finds all routes.
