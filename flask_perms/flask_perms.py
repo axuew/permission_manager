@@ -611,7 +611,7 @@ class Flask_Perms(object):
                 self.addRolePerms()
                 self.integrateRoutesTemplates()
                 self.remapToBlueprint()
-                # self.addDefaultPermissions()
+                # self.addDefaultPermissions() # ToDO Test and Reactivate
                 self.appRouteParse()
                 self.findUnprotectedRoutes()
                 self.check_missing()
@@ -1372,7 +1372,7 @@ class Flask_Perms(object):
                     print()
                 print('- - - - -')
 
-            def userSummary(self, id):
+            def userSummary(self, id): # ToDo Convert to flexible definition of primary key
 
                 user = User.query.filter_by(id=id).first()
 
