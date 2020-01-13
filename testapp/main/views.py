@@ -18,12 +18,11 @@ def load_user(user_id):
 
 @main.route('/')
 def index():
-    pm.report()
     return 'hello!'
 
 
-@main.route('/<num>')
-@permission_required(['test'])
+@main.route('/num/<num>')
+@permission_required(['test'], api=True)
 def num_index(num):
 
     user = User.query.filter_by(id=num).first()
