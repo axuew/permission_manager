@@ -42,7 +42,7 @@ def _getPermsRequired(useType, permissions=None, roles=None, api=False):
 
             rolePerms = localRole.allPermissionsRoles()[0]
             for p in rolePerms:
-                permsRequired.add(p.name) #ToDo Check against p.name
+                permsRequired.add(p.name)
     return permsRequired
 
 
@@ -58,6 +58,11 @@ def _missingPermHandling(missingPerms, hide, api):
         else:
             flash(f'Insufficient permissions, missing: [{missingPerms}].', 'danger')
     else:
+        if hide == "admin":
+            if api:
+                return jsonify({'error': 'Not Found'}), 404
+            else:
+                abort(404)
         if api:
             return jsonify({'error': 'unauthorized'}), 403
         else:
@@ -83,14 +88,14 @@ def _permissionRouteHandling(useType, permissions=None, roles=None, hide='', api
 def permissionCheck(permissions=None, roles=None, user=current_user, permSet=None, api=False):
 
     """
-    For checking user permissions outside of the context of a route decorator or template.  While a direct check against
-     the user's permSet can be done, using this function adds integration into the Permission QC functionality.
+    For checking user permissions outside of the context of a route decorator or template.
 
-    :param permissions: (list, set, string)
-    :param roles: (list, set)
-    :param user:
-    :param permSet:
-    :return: tuple with boolean specifying the user has required permissions, and if the user does not but does have
+    :param permissions: (list, set, string) The permission name(s) required.
+    :param roles: (list, set) The role name(s) required.
+    :param user: (user, default=current_user) A user object.  Defaults to the Flask-Login current_user.
+    :param permSet: (set) A set of permission names. If utilized, set the user parameter to None.
+    :param api: (bool) If True, handle non-fatal permissions errors with an JSON response.
+    :return: Tuple with boolean specifying the user has required permissions, and if the user does not but does have
                 the default 'view_missing_permissions' permission, a list of permission names they are missing from the
                 check.
     """
@@ -117,13 +122,16 @@ def permissionCheck(permissions=None, roles=None, user=current_user, permSet=Non
 
 def permission_required(permissions=None, roles=None, hide='', api=False):
     """
-    Decorator for routing functions that limits access by permissions and roles.  if the user or user's roles do not
+    Decorator for routing functions that limits access by permissions and roles.  If the user or user's roles do not
     have the proper permission, restrict access.
 
     :param permissions: (list, set) Specific permission names (strings) required for route access.
                                     ex: ['edit', 'view_admin_panel']
     :param roles: (list) If supplied, all the permissions associated with this role will be required for route access.
-    :param hide: (bool) If True, Return a 404 if user is missing permissions (or is not logged in)
+    :param hide: ('', 'off', 'on', 'unauthorized','all') Return a 404 error if not authorized. '' or 'off' = don't hide,
+                 'on' = hide from logged out users, 'admin' = hide from anyone without the 'view_missing_permissions'
+                 permission, and 'all' = hide from anyone without the proper permissions.
+    :param api: (bool) If True, use JSON responses. Set to True if this is an API endpoint.
     :return: Allows route if current_user has proper set of permissions.
     """
     def decorator(f):
@@ -139,7 +147,7 @@ def permission_required(permissions=None, roles=None, hide='', api=False):
 
                 return f(*args, **kwargs)
 
-            elif not hide:
+            elif not hide or hide == 'off':
                 if api:
                     return jsonify({'error': 'unauthorized'}), 401
                 flash('Please log in to access this page.', 'warning')
@@ -153,7 +161,19 @@ def permission_required(permissions=None, roles=None, hide='', api=False):
 
 
 def bp_permission_required(permissions=None, roles=None, hide='', func=None, api=False):
+    """
+    Decorator that limits access by permissions and roles to an entire blueprint.  If the user or user's roles do not
+    have the proper permission, restrict access.
 
+    :param permissions: (list, set) Specific permission names (strings) required for route access.
+                                    ex: ['edit', 'view_admin_panel']
+    :param roles: (list) If supplied, all the permissions associated with this role will be required for route access.
+    :param hide: ('', 'off', 'on', 'unauthorized','all') Return a 404 error if not authorized. '' or 'off' = don't hide,
+                 'on' = hide from logged out users, 'admin' = hide from anyone without the 'view_missing_permissions'
+                 permission, and 'all' = hide from anyone without the proper permissions.
+    :param api: (bool) If True, use JSON responses. Set to True if this is an API endpoint.
+    :return: Allows route if current_user has proper set of permissions.
+    """
     if not func:
         raise ValueError('bp_permission_required called without decorated func')
 
