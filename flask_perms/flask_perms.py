@@ -125,12 +125,13 @@ class Flask_Perms(object):
 
             def addRole(self, role=None, roleName=None, roleId=None):
                 """
-                Add a role from which permissions will be inherited.  Checks to make sure not trying to inherit itself, and
-                itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
-                :param role:
-                :param roleName:
-                :param roleId:
-                :return:
+                Grants a role to the user from which permissions will be inherited.  Priority to arguments goes role,
+                roleName, then roleId.
+
+                :param role (Role): A role instance
+                :param roleName (str): A role instance name
+                :param roleId: A role primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
                 """
 
                 roleModel = get_model('role')
@@ -164,7 +165,15 @@ class Flask_Perms(object):
                 return True, f"{addedRole} added to {self}."
 
             def removeRole(self, role=None, roleName=None, roleId=None):
+                """
+                Removes a role from the user.  This only removes a directly applied role; the user may still have the
+                role through another role's inherited roles.
 
+                :param role (Role): A role instance
+                :param roleName (str): A role instance name
+                :param roleId: A role primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
+                """
                 roleModel = get_model('role')
 
                 if role:
@@ -192,11 +201,18 @@ class Flask_Perms(object):
                 db.session.add(self)
                 db.session.commit()
 
-                return True, f"{removedRole} removed from {self}. NOTE it may still inherit the Role " \
-                    f"(or the Role's permissions) through another inherited Role's inherited Roles."
+                return True, f"{removedRole} removed from {self}. NOTE it may still inherit the role " \
+                    f"(or the role's permissions) through another inherited role's inherited roles."
 
             def addPermission(self, permission=None, permName=None, permId=None):
+                """
+                Adds a direct permission to the user.
 
+                :param permission (Permission): A permission instance
+                :param permName (str): A permission instance name
+                :param permId: A permission primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
+                """
                 permModel = get_model('perm')
 
                 if permission:
@@ -204,15 +220,15 @@ class Flask_Perms(object):
                         tempName = permission.name
                         addedPerm = permission
                     except AttributeError:
-                        return False, f'{permission} is not a valid Permission.'
+                        return False, f'{permission} is not a valid permission.'
                 elif permName:
                     addedPerm = permModel.query.filter_by(name=permName).first()
                     if not addedPerm:
-                        return False, f'{permName} is not a valid Permission name.'
+                        return False, f'{permName} is not a valid permission name.'
                 elif permId:
                     addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
                     if not addedPerm:
-                        return False, f'{permName} is not a valid Permission name.'
+                        return False, f'{permName} is not a valid permission name.'
 
                 if addedPerm in self.permissions:
                     return False, f'{self} already has {addedPerm}.'
@@ -224,7 +240,15 @@ class Flask_Perms(object):
                 return True, f'{addedPerm} added to {self}.'
 
             def removePermission(self, permission=None, permName=None, permId=None):
+                """
+                Removes a direct permission from the user.  This only removes the direct permission; if the permission
+                is also granted through an assigned Role, the user will still have the permission.
 
+                :param permission (Permission): A permission instance
+                :param permName (str): A permission instance name
+                :param permId: A permission primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
+                """
                 permModel = get_model('perm')
 
                 if permission:
@@ -232,15 +256,15 @@ class Flask_Perms(object):
                         tempName = permission.name
                         removedPerm = permission
                     except AttributeError:
-                        return False, f'{permission} is not a valid Permission.'
+                        return False, f'{permission} is not a valid permission.'
                 elif permName:
                     removedPerm = permModel.query.filter_by(name=permName).first()
                     if not removedPerm:
-                        return False, f'{permName} is not a valid Permission name.'
+                        return False, f'{permName} is not a valid permission name.'
                 elif permId:
                     addedPerm = permModel.query.filter_by(**{perm_pk: permId}).first()
                     if not addedPerm:
-                        return False, f'{permName} is not a valid Permission name.'
+                        return False, f'{permName} is not a valid permission name.'
 
                 if removedPerm not in self.permissions:
                     return False, f'{self} does not directly have {removedPerm}.'
@@ -249,12 +273,14 @@ class Flask_Perms(object):
                 db.session.add(self)
                 db.session.commit()
 
-                return True, f'{removedPerm} removed from {self}. NOTE it may still be present in a given Role.'
+                return True, f'{removedPerm} removed from {self}. NOTE it may still be present in a given role.'
 
             def allPermissionsRoles(self):
                 """
-                returns a tuple containing all user permissions, and all direct or inherited roles.
-                :return:
+                Returns a tuple containing a set of all user permission names, and a set of all direct and inherited
+                role names.
+
+                :return: (permission_name_set, role_name_set)
                 """
                 permSet = set()
                 for p in self.permissions:
@@ -308,7 +334,6 @@ class Flask_Perms(object):
 
             return roleNameSet
 
-
         class RoleMixinP(db.Model):
             __tablename__ = "roles"
             __abstract__ = True
@@ -325,6 +350,9 @@ class Flask_Perms(object):
 
             @declared_attr
             def parents(cls):
+                """
+                List of roles the role inherits from.
+                """
                 return db.relationship(role_model, secondary='role_links',
                                        primaryjoin=f"RoleLink.role_id==%s.{role_pk}" % cls.__name__,
                                        secondaryjoin=f"RoleLink.parent_id==%s.{role_pk}" % cls.__name__,
@@ -335,12 +363,13 @@ class Flask_Perms(object):
 
             def inheritRole(self, role=None, roleName=None, roleId=None):
                 """
-                Add a role from which permissions will be inherited.  Checks to make sure not trying to inherit itself, and
-                itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
-                :param role:
-                :param roleName:
-                :param roleId:
-                :return:
+                Add a role from which permissions will be inherited.  Checks to make sure not trying to inherit itself,
+                and itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
+
+                :param role (Role): A role instance
+                :param roleName (str): A role instance name
+                :param roleId: A role primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
                 """
 
                 roleModel = get_model('role')
@@ -380,12 +409,12 @@ class Flask_Perms(object):
 
             def removeInheritedRole(self, role=None, roleName=None, roleId=None):
                 """
-                Remove a role from which permissions were inherited.  Checks to make sure not trying to inherit itself, and
-                itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
-                :param role:
-                :param roleName:
-                :param roleId:
-                :return:
+                Remove a role from which permissions were inherited.  Checks to make sure not trying to inherit itself,
+                and itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
+                :param role (Role): A role instance
+                :param roleName (str): A role instance name
+                :param roleId: A role primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
                 """
 
                 roleModel = get_model('role')
@@ -426,6 +455,14 @@ class Flask_Perms(object):
                     f"through another inherited Role's inherited Roles."
 
             def addPermission(self, permission=None, permName=None, permId=None):
+                """
+                Adds a permission to the role.
+
+                :param permission (Permission): A permission instance
+                :param permName (str): A permission instance name
+                :param permId: A permission primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
+                """
 
                 permModel = get_model('perm')
 
@@ -454,6 +491,14 @@ class Flask_Perms(object):
                 return True, f'{addedPerm} added to {self}.'
 
             def removePermission(self, permission=None, permName=None, permId=None):
+                """
+                Removes a permission from the role.
+
+                :param permission (Permission): A permission instance
+                :param permName (str): A permission instance name
+                :param permId: A permission primary key value.
+                :return: A tuple containing a boolean representing the success of the operation, and a response string.
+                """
 
                 permModel = get_model('perm')
 
@@ -482,7 +527,12 @@ class Flask_Perms(object):
                 return True, f'{removedPerm} removed from {self}. NOTE it may still be present in an inherited Role.'
 
             def allPermissionsRoles(self, previousRoleNames=None):
+                """
+                Returns a tuple containing a set of all role permission names, and a set including the role name and all
+                inherited role names.
 
+                :return: (permission_name_set, role_name_set)
+                """
                 rolePermsSet = set()
                 if not previousRoleNames:
                     previousRoleNames = set()
