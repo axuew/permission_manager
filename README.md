@@ -56,8 +56,11 @@ class Permission(pm.PermissionMixinP, db.Model):
 To function, the permission manager needs the names of your user, role, and permission models, as well as the primary key names for each.  Additionally, if you'd like to set a different name for the administrator/root role, set ROOT_ROLE.  All current config keys and default values are below:
 
 - USER_MODEL_NAME: "User"
+- USER_TABLE_NAME: "users"
 - ROLE_MODEL_NAME: "Role"
+- ROLE_TABLE_NAME: "roles"
 - PERMISSION_MODEL_NAME: "Permission"
+- PERMISSION_TABLE_NAME: "permissions"
 - USER_PRIMARY_KEY: "id"
 - ROLE_PRIMARY_KEY: "id"
 - PERMISSION_PRIMARY_KEY: "id"

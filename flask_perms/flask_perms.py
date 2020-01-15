@@ -11,14 +11,21 @@ from werkzeug.local import LocalProxy
 
 
 class Flask_Perms(object):
-    def __init__(self, app=None, **kwargs):
-        for k, v in kwargs.items():
-            setattr(self, k, v)
+    """
+    Used for permission control integration in one or more Flask applications.  Initialize with a SQLAlchemy database
+    instance.
 
+    """
+    def __init__(self, app=None, db=None, **kwargs):
+        for k, v in kwargs.items():
+            if app and k == 'db':
+                db = v
+            setattr(self, k, v)
         if app:
-            self.init_app(app)
+            self.init_app(app, db)
 
     def init_app(self, app, db):
+
         app.config.setdefault('STORE_TYPE', STORE_TYPE)
         self.store_type = app.config['STORE_TYPE']
 
@@ -59,6 +66,8 @@ class Flask_Perms(object):
                            'role': app.config['ROLE_TABLE_NAME'],
                            'perm': app.config['PERMISSION_TABLE_NAME']
                            }
+
+
 
         self.RoleLink = self._createRoleLinkModel(app, db)
 
@@ -112,7 +121,7 @@ class Flask_Perms(object):
                     return c
 
         class UserMixinP(db.Model):
-            __tablename__ = "users"
+            __tablename__ = app.config['USER_TABLE_NAME']
             __abstract__ = True
 
             @declared_attr
@@ -335,7 +344,7 @@ class Flask_Perms(object):
             return roleNameSet
 
         class RoleMixinP(db.Model):
-            __tablename__ = "roles"
+            __tablename__ = app.config['ROLE_TABLE_NAME']
             __abstract__ = True
             name = db.Column(db.String(64), unique=True)
             description = db.Column(db.Text)
@@ -562,7 +571,7 @@ class Flask_Perms(object):
         role_model = app.config['ROLE_MODEL_NAME']
 
         class PermissionMixinP(db.Model):
-            __tablename__ = "permissions"
+            __tablename__ = app.config['PERMISSION_TABLE_NAME']
             __abstract__ = True
             id = db.Column(db.Integer, primary_key=True)
             name = db.Column(db.String(64), unique=True)
@@ -918,6 +927,16 @@ class Flask_Perms(object):
                             self.appRoutes[bp][route]['protected'] = False
 
             def report(self):
+                """
+                Prints a summary report in the console.
+
+                - Permissions used in app, but not found in the permission store
+                - Root role check
+                - Routes with undeclared permissions
+                - Templates with undeclared permissions
+                - Permissioned users
+                - Declared Roles
+                """
 
                 print('Permission report:')
                 print('- - - - - - - - - - - - - - - - - - - -')
@@ -1108,13 +1127,15 @@ class Flask_Perms(object):
 
                 test = 1
 
-            def init_permissions(self, fromApp=True, fromFile=True, createRoot=True):
+            def init_permissions(self, fromApp=True, fromFile=False, createRoot=True):
                 """
-                wrapper for populate_from_app, populate_from_file, and create_root.
-                :param fromApp:
-                :param fromFile:
-                :param createRoot:
-                :return:
+                Instantiates or updates the permissions definitions and root role in the database based on declared
+                app permissions.  Wrapper for populate_from_app, populate_from_file, and create_root.
+
+                :param fromApp: (bool) If true, attempt to add any undelared permissions in the app to the database.
+                :param fromFile: (bool) If true, update permissions definitions using a CSV. (Not yet implemented)
+                :param createRoot: (bool) If true, create/ update the app's root role.
+                :return: None
                 """
                 if fromApp:
                     self.populate_from_app()
@@ -1143,8 +1164,10 @@ class Flask_Perms(object):
 
             def create_root(self):
                 """
-                First, check if a Role with name == to rootName exists, instantiate one if not.  Then, make sure missingPerms is
-                 empty.  If not, rerun populate_from_app.  Then, add any perms to the role not already present.
+                Creates or updates the root role with all permissions declared in app and in the database.
+                First, check if a Role with name == to rootName exists, instantiate one if not.  Then, make sure
+                missingPerms is empty.  If not, rerun populate_from_app.  Then, add any perms to the role not already
+                present.
                 """
 
                 if self.rootRole not in self.roleNames:
@@ -1167,6 +1190,8 @@ class Flask_Perms(object):
 
             def generate_user_info(self):
                 """
+                In Progress.
+
                 still to do:
                 for each user,
                     ---generate a dictionary of templates they have access to, and the traceback to the template.
@@ -1423,6 +1448,12 @@ class Flask_Perms(object):
                 print('- - - - -')
 
             def userSummary(self, id): # ToDo Convert to flexible definition of primary key
+                """
+                Prints a summary of an individual user's permissions and access.
+
+                :param id: user's primary key.
+
+                """
 
                 user = User.query.filter_by(id=id).first()
 
@@ -1480,7 +1511,12 @@ class Flask_Perms(object):
                 print('\n')
 
             def roleSummary(self, id):
+                """
+                Prints a summary of a particular role's permissions and access.
 
+                :param id: role's primary key.
+
+                """
                 role = Role.query.filter_by(id=id).first()
 
                 # list User Permissions and sources
@@ -1547,7 +1583,7 @@ class Flask_Perms(object):
         pm.init()
         ctx.perm_manager = pm
 
-
+# Importable instance of the Permission_manager
 perm_manager = LocalProxy(lambda: _get_manager())
 
 
