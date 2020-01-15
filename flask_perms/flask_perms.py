@@ -1447,15 +1447,23 @@ class Flask_Perms(object):
                     print()
                 print('- - - - -')
 
-            def userSummary(self, id): # ToDo Convert to flexible definition of primary key
+            def userSummary(self, kvDict): # ToDo Convert to flexible definition of primary key
                 """
                 Prints a summary of an individual user's permissions and access.
 
-                :param id: user's primary key.
+                :param kvDict: (dict) A dictionary of columns/keys and their values of the requested user.
 
                 """
 
-                user = User.query.filter_by(id=id).first()
+                user = User.query.filter_by(**kvDict).all()
+
+                if not user:
+                    print('No user found.')
+                    return
+                if len(user) > 1:
+                    print(f'{len(user)} users found matching that criteria.')
+                    return
+                user = user[0]
 
                 # list User Permissions and sources
                 permNames = user.allPermissionsRoles()[0]
@@ -1510,14 +1518,23 @@ class Flask_Perms(object):
                 self._printTemplateAccess(self._templateAccessSummary(permNames))
                 print('\n')
 
-            def roleSummary(self, id):
+            def roleSummary(self, kvDict):
                 """
                 Prints a summary of a particular role's permissions and access.
 
-                :param id: role's primary key.
+                :param kvDict: (dict) A dictionary of columns/keys and their values of the requested role.
 
                 """
-                role = Role.query.filter_by(id=id).first()
+
+                role = Role.query.filter_by(**kvDict).all()
+
+                if not role:
+                    print('No role found.')
+                    return
+                if len(role) > 1:
+                    print(f'{len(role)} roles found matching that criteria.')
+                    return
+                role = role[0]
 
                 # list User Permissions and sources
                 permNames = role.allPermissionsRoles()[0]
