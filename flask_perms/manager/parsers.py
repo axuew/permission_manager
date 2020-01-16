@@ -7,8 +7,6 @@ from pprint import pprint
 from jinja2 import Environment, FileSystemLoader, meta, visitor
 
 
-
-
 class TemplateParser:
     def __init__(self, path=None):
         self.output = {}
