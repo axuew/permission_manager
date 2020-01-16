@@ -53,7 +53,7 @@ class Permission(pm.PermissionMixinP, db.Model):
 ```
 
 #### Configuration Values
-To function, the permission manager needs the names of your user, role, and permission models, as well as the primary key names for each.  Additionally, if you'd like to set a different name for the administrator/root role, set ROOT_ROLE.  All current config keys and default values are below:
+To function, the permission manager needs the class names of your user, role, and permission models, as well as the primary key names for each.  Additionally, if you'd like to set a different name for the administrator/root role, set ROOT_ROLE.  All current config keys and default values are below:
 
 - USER_MODEL_NAME: "User"
 - USER_TABLE_NAME: "users"
@@ -64,6 +64,10 @@ To function, the permission manager needs the names of your user, role, and perm
 - USER_PRIMARY_KEY: "id"
 - ROLE_PRIMARY_KEY: "id"
 - PERMISSION_PRIMARY_KEY: "id"
+- ROLE_LINK_NAME: "role_links"
+- USER_ROLE_LINK_NAME: "user_role_links"
+- USER_PERMISSION_LINK_NAME: "user_permission_links"
+- ROLE_PERMISSION_LINK_NAME: "role_permission_links"
 - ROOT_ROLE: "Head Admin"
 
 #### Shell access and management initialization
