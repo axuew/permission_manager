@@ -1,0 +1,2 @@
+include flask_perms/templates/*
+include README.md
