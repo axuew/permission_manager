@@ -1,4 +1,82 @@
 from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.exc import InvalidRequestError
+
+
+def _modelActionBase(self, instance=None, instanceName=None, kvDict=None, **kwargs):
+    """
+    Grants a role to the user from which permissions will be inherited.  Priority to arguments goes role,
+    roleName, then roleId.
+
+    :param role: (Role) A role instance
+    :param roleName: (str) A role instance name
+    :param roleId: A role primary key value.
+    :return: A tuple containing a boolean representing the success of the operation, and a response string.
+    """
+
+    model = kwargs['model']
+    db = kwargs['db']
+    action = kwargs['action']
+    modelType = kwargs['modelType']
+
+    responseDict = {'role': {'removed': f"NOTE it may still inherit the role "
+                                        f"(or the role's permissions) through another inherited role's inherited roles."
+                             },
+                    'permission': {'removed': 'NOTE it may still be present in a given role.'}
+                    }
+
+    if instance:
+        try:
+            activeInstance = instance
+        except AttributeError:
+            return False, f'{instance} is not a valid {modelType}.'
+
+    elif instanceName:
+        activeInstance = model.query.filter_by(name=instanceName).first()
+        if not activeInstance:
+            return False, f'{model} is not a valid {modelType} name.'
+
+    elif kvDict:
+        try:
+            activeInstance = model.query.filter_by(**kvDict).all()
+        except InvalidRequestError:
+            db.session.rollback()
+            return False, f"Invalid {modelType} property given."
+        if not activeInstance:
+            return False, f'No existing {modelType} found matching values.'
+        if len(activeInstance) > 1:
+            return False, f'{len(activeInstance)} {modelType} found matching given values.'
+        activeInstance = activeInstance[0]
+
+    else:
+        return False, f'One of arguments {modelType}, {modelType}Name, or kvDict must be specified.'
+
+    if action == 'add':
+        if (modelType == 'role' and activeInstance in self.roles) or \
+                (modelType == 'permission' and activeInstance in self.permissions):
+            return False, f"{self} already has {activeInstance}."
+
+    if action == 'remove':
+        if (modelType == 'role' and activeInstance not in self.roles) or \
+                (modelType == 'permission' and activeInstance not in self.permissions):
+            return False, f"{self} does not directly have {activeInstance}."
+
+    if action == 'add':
+        if modelType == 'role':
+            self.roles.append(activeInstance)
+        elif modelType == 'permission':
+            self.permissions.append(activeInstance)
+    elif action == 'remove':
+        if modelType == 'role':
+            self.roles.remove(activeInstance)
+        elif modelType == 'permission':
+            self.permissions.remove(activeInstance)
+    db.session.add(self)
+    db.session.commit()
+
+    if action == 'add':
+        return True, f"{activeInstance} added to {self}."
+    if action == 'remove':
+        return True, f"{activeInstance} removed from {self}. {responseDict[modelType]['removed']}"
 
 
 def _createUserMixin(ext, db):
@@ -20,156 +98,56 @@ def _createUserMixin(ext, db):
         def permissions(cls):
             return db.relationship(ext.perm_model, secondary='user_permission_links')
 
-        def addRole(self, role=None, roleName=None, roleId=None):
+        def addRole(self, role=None, roleName=None, kvDict=None):
             """
             Grants a role to the user from which permissions will be inherited.  Priority to arguments goes role,
             roleName, then roleId.
 
             :param role: (Role) A role instance
             :param roleName: (str) A role instance name
-            :param roleId: A role primary key value.
+            :param kvDict: A dictionary of role model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
+            return _modelActionBase(self, instance=role, instanceName=roleName, kvDict=kvDict,
+                                    model=get_model('role'), db=db, action='add', modelType='role')
 
-            roleModel = get_model('role')
-
-            if role:
-                try:
-                    tempName = role.name
-                    addedRole = role
-                except AttributeError:
-                    return False, f'{role} is not a valid Role.'
-
-            elif roleName:
-
-                addedRole = roleModel.query.filter_by(name=roleName).first()
-                if not addedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            elif roleId:
-                addedRole = roleModel.query.filter_by(**{ext.role_pk: roleId}).first()
-                if not addedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            else:
-                return False, 'One of arguments role, roleName, or roleId must be specified.'
-
-            if addedRole in self.roles:
-                return False, f"{self} already has {addedRole}."
-
-            self.roles.append(addedRole)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f"{addedRole} added to {self}."
-
-        def removeRole(self, role=None, roleName=None, roleId=None):
+        def removeRole(self, role=None, roleName=None, kvDict=None):
             """
             Removes a role from the user.  This only removes a directly applied role; the user may still have the
             role through another role's inherited roles.
 
-            :param role (Role): A role instance
-            :param roleName (str): A role instance name
-            :param roleId: A role primary key value.
+            :param role: (Role) A role instance
+            :param roleName: (str) A role instance name
+            :param kvDict: A dictionary of role model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
-            roleModel = get_model('role')
+            return _modelActionBase(self, instance=role, instanceName=roleName, kvDict=kvDict,
+                                    model=get_model('role'), db=db, action='remove', modelType='role')
 
-            if role:
-                try:
-                    removedRole = role
-                except AttributeError:
-                    return False, f'{role} is not a valid Role.'
-
-            elif roleName:
-                removedRole = roleModel.query.filter_by(name=roleName).first()
-                if not removedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            elif roleId:
-                removedRole = roleModel.query.filter_by(**{ext.role_pk: roleId}).first()
-                if not removedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            else:
-                return False, 'One of arguments role, roleName, or roleId must be specified.'
-
-            if removedRole not in self.roles:
-                return False, f"{self} does not directly have {removedRole}."
-
-            self.roles.remove(removedRole)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f"{removedRole} removed from {self}. NOTE it may still inherit the role " \
-                f"(or the role's permissions) through another inherited role's inherited roles."
-
-        def addPermission(self, permission=None, permName=None, permId=None):
+        def addPermission(self, permission=None, permName=None, kvDict=None):
             """
             Adds a direct permission to the user.
 
-            :param permission (Permission): A permission instance
-            :param permName (str): A permission instance name
-            :param permId: A permission primary key value.
+            :param permission: (Permission) A permission instance
+            :param permName: (str) A permission instance name
+            :param kvDict: A dictionary of permission model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
-            permModel = get_model('perm')
+            return _modelActionBase(self, instance=permission, instanceName=permName, kvDict=kvDict,
+                                    model=get_model('perm'), db=db, action='add', modelType='permission')
 
-            if permission:
-                try:
-                    tempName = permission.name
-                    addedPerm = permission
-                except AttributeError:
-                    return False, f'{permission} is not a valid permission.'
-            elif permName:
-                addedPerm = permModel.query.filter_by(name=permName).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid permission name.'
-            elif permId:
-                addedPerm = permModel.query.filter_by(**{ext.perm_pk: permId}).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid permission name.'
-
-            if addedPerm in self.permissions:
-                return False, f'{self} already has {addedPerm}.'
-
-            self.permissions.append(addedPerm)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f'{addedPerm} added to {self}.'
-
-        def removePermission(self, permission=None, permName=None, permId=None):
+        def removePermission(self, permission=None, permName=None, kvDict=None):
             """
             Removes a direct permission from the user.  This only removes the direct permission; if the permission
             is also granted through an assigned Role, the user will still have the permission.
 
-            :param permission (Permission): A permission instance
-            :param permName (str): A permission instance name
-            :param permId: A permission primary key value.
+            :param permission: (Permission) A permission instance
+            :param permName: (str) A permission instance name
+            :param kvDict: A dictionary of permission model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
-            permModel = get_model('perm')
-
-            if permission:
-                try:
-                    tempName = permission.name
-                    removedPerm = permission
-                except AttributeError:
-                    return False, f'{permission} is not a valid permission.'
-            elif permName:
-                removedPerm = permModel.query.filter_by(name=permName).first()
-                if not removedPerm:
-                    return False, f'{permName} is not a valid permission name.'
-            elif permId:
-                addedPerm = permModel.query.filter_by(**{ext.perm_pk: permId}).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid permission name.'
-
-            if removedPerm not in self.permissions:
-                return False, f'{self} does not directly have {removedPerm}.'
-
-            self.permissions.remove(removedPerm)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f'{removedPerm} removed from {self}. NOTE it may still be present in a given role.'
+            return _modelActionBase(self, instance=permission, instanceName=permName, kvDict=kvDict,
+                                    model=get_model('perm'), db=db, action='remove', modelType='permission')
 
         def allPermissionsRoles(self):
             """
@@ -299,8 +277,8 @@ def _createRoleMixin(ext, db):
             """
             Remove a role from which permissions were inherited.  Checks to make sure not trying to inherit itself,
             and itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
-            :param role (Role): A role instance
-            :param roleName (str): A role instance name
+            :param role: (Role) A role instance
+            :param roleName: (str) A role instance name
             :param roleId: A role primary key value.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
@@ -342,77 +320,29 @@ def _createRoleMixin(ext, db):
                 f"NOTE it may still inherit the Role (or the Role's permissions) " \
                 f"through another inherited Role's inherited Roles."
 
-        def addPermission(self, permission=None, permName=None, permId=None):
+        def addPermission(self, permission=None, permName=None, kvDict=None):
             """
             Adds a permission to the role.
 
-            :param permission (Permission): A permission instance
-            :param permName (str): A permission instance name
-            :param permId: A permission primary key value.
+            :param permission: (Permission) A permission instance
+            :param permName: (str) A permission instance name
+            :param kvDict: A dictionary of permission model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
+            return _modelActionBase(self, instance=permission, instanceName=permName, kvDict=kvDict,
+                                    model=get_model('perm'), db=db, action='add', modelType='permission')
 
-            permModel = get_model('perm')
-
-            if permission:
-                try:
-                    tempName = permission.name
-                    addedPerm = permission
-                except AttributeError:
-                    return False, f'{permission} is not a valid Permission.'
-            elif permName:
-                addedPerm = permModel.query.filter_by(name=permName).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid Permission name.'
-            elif permId:
-                addedPerm = permModel.query.filter_by(**{ext.perm_pk: permId}).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid Permission name.'
-
-            if addedPerm in self.permissions:
-                return False, f'{self} already has {addedPerm}.'
-
-            self.permissions.append(addedPerm)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f'{addedPerm} added to {self}.'
-
-        def removePermission(self, permission=None, permName=None, permId=None):
+        def removePermission(self, permission=None, permName=None, kvDict=None):
             """
             Removes a permission from the role.
 
-            :param permission (Permission): A permission instance
-            :param permName (str): A permission instance name
-            :param permId: A permission primary key value.
+            :param permission: (Permission) A permission instance
+            :param permName: (str) A permission instance name
+            :param kvDict: A dictionary of permission model keys/values.
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
-
-            permModel = get_model('perm')
-
-            if permission:
-                try:
-                    tempName = permission.name
-                    removedPerm = permission
-                except AttributeError:
-                    return False, f'{permission} is not a valid Permission.'
-            elif permName:
-                removedPerm = permModel.query.filter_by(name=permName).first()
-                if not removedPerm:
-                    return False, f'{permName} is not a valid Permission name.'
-            elif permId:
-                addedPerm = permModel.query.filter_by(**{ext.perm_pk: permId}).first()
-                if not addedPerm:
-                    return False, f'{permName} is not a valid Permission name.'
-
-            if removedPerm not in self.permissions:
-                return False, f'{self} does not directly have {removedPerm}.'
-
-            self.permissions.remove(removedPerm)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f'{removedPerm} removed from {self}. NOTE it may still be present in an inherited Role.'
+            return _modelActionBase(self, instance=permission, instanceName=permName, kvDict=kvDict,
+                                    model=get_model('perm'), db=db, action='remove', modelType='permission')
 
         def allPermissionsRoles(self, previousRoleNames=None):
             """

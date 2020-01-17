@@ -847,10 +847,10 @@ def _createManager(ext, app, db):
             user = User.query.filter_by(**kvDict).all()
 
             if not user:
-                print('No user found.')
+                print('No existing user found matching given values.')
                 return
             if len(user) > 1:
-                print(f'{len(user)} users found matching that criteria.')
+                print(f'{len(user)} users found matching given values.')
                 return
             user = user[0]
 
@@ -918,7 +918,7 @@ def _createManager(ext, app, db):
             role = Role.query.filter_by(**kvDict).all()
 
             if not role:
-                print('No role found.')
+                print('No existing role found matching values.')
                 return
             if len(role) > 1:
                 print(f'{len(role)} roles found matching that criteria.')
