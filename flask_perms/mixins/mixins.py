@@ -2,14 +2,17 @@ from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.exc import InvalidRequestError
 
 
-def _modelActionBase(self, instance=None, instanceName=None, kvDict=None, **kwargs):
+def _modelActionBase(assignee, instance=None, instanceName=None, kvDict=None, **kwargs):
     """
-    Grants a role to the user from which permissions will be inherited.  Priority to arguments goes role,
-    roleName, then roleId.
 
-    :param role: (Role) A role instance
-    :param roleName: (str) A role instance name
-    :param roleId: A role primary key value.
+    Adds/removes the given assignment (instance) from the assignee.
+
+    :param self: The model instance upon which the action is applied.
+    :param instance: The model instance that is being added/removed.
+    :param instanceName: The model instance name that is being added/removed.
+    :param kvDict: A dictionary of keys/values for the model instance being added/removed.
+    :param kwargs: Action specifications.
+
     :return: A tuple containing a boolean representing the success of the operation, and a response string.
     """
 
@@ -17,12 +20,15 @@ def _modelActionBase(self, instance=None, instanceName=None, kvDict=None, **kwar
     db = kwargs['db']
     action = kwargs['action']
     modelType = kwargs['modelType']
+    inherit = kwargs.get('inherit', False)
 
     responseDict = {'role': {'removed': f"NOTE it may still inherit the role "
                                         f"(or the role's permissions) through another inherited role's inherited roles."
                              },
                     'permission': {'removed': 'NOTE it may still be present in a given role.'}
                     }
+
+    assert action in ['add', 'remove'], 'Invalid action'
 
     if instance:
         try:
@@ -33,7 +39,7 @@ def _modelActionBase(self, instance=None, instanceName=None, kvDict=None, **kwar
     elif instanceName:
         activeInstance = model.query.filter_by(name=instanceName).first()
         if not activeInstance:
-            return False, f'{model} is not a valid {modelType} name.'
+            return False, f'{instanceName} is not a valid {modelType} name.'
 
     elif kvDict:
         try:
@@ -50,33 +56,47 @@ def _modelActionBase(self, instance=None, instanceName=None, kvDict=None, **kwar
     else:
         return False, f'One of arguments {modelType}, {modelType}Name, or kvDict must be specified.'
 
+    if inherit and hasattr(assignee, 'name') and assignee.name == activeInstance.name:
+        if action == 'add':
+            return False, f'{modelType.capitalize()} cannot inherit itself.'
+        elif action == 'remove':
+            return False, f'{modelType.capitalize()} cannot remove itself.'
+
     if action == 'add':
-        if (modelType == 'role' and activeInstance in self.roles) or \
-                (modelType == 'permission' and activeInstance in self.permissions):
-            return False, f"{self} already has {activeInstance}."
+        if (modelType == 'role' and activeInstance in assignee.roles) or \
+                (modelType == 'permission' and activeInstance in assignee.permissions):
+            return False, f"{assignee} already has {activeInstance}."
 
     if action == 'remove':
-        if (modelType == 'role' and activeInstance not in self.roles) or \
-                (modelType == 'permission' and activeInstance not in self.permissions):
-            return False, f"{self} does not directly have {activeInstance}."
+        if (modelType == 'role' and activeInstance not in assignee.roles) or \
+                (modelType == 'permission' and activeInstance not in assignee.permissions):
+            return False, f"{assignee} does not directly have {activeInstance}."
 
     if action == 'add':
         if modelType == 'role':
-            self.roles.append(activeInstance)
+            assignee.roles.append(activeInstance)
         elif modelType == 'permission':
-            self.permissions.append(activeInstance)
+            assignee.permissions.append(activeInstance)
     elif action == 'remove':
         if modelType == 'role':
-            self.roles.remove(activeInstance)
+            assignee.roles.remove(activeInstance)
         elif modelType == 'permission':
-            self.permissions.remove(activeInstance)
-    db.session.add(self)
+            assignee.permissions.remove(activeInstance)
+    db.session.add(assignee)
     db.session.commit()
 
     if action == 'add':
-        return True, f"{activeInstance} added to {self}."
+        if inherit:
+            return True, f"<{assignee}'> now inherits from <{activeInstance}>."
+        else:
+            return True, f"<{activeInstance}> added to <{assignee}>."
     if action == 'remove':
-        return True, f"{activeInstance} removed from {self}. {responseDict[modelType]['removed']}"
+        if inherit:
+            return True, f"<{assignee}> no longer inherits directly from <{activeInstance}>. " \
+                f"NOTE it may still inherit the {modelType} (or the {modelType}'s permissions) " \
+                f"through another inherited {modelType}'s inherited {modelType}."
+        else:
+            return True, f"<{activeInstance}> removed from {assignee}. {responseDict[modelType]['removed']}"
 
 
 def _createUserMixin(ext, db):
@@ -227,7 +247,7 @@ def _createRoleMixin(ext, db):
         def __repr__(self):
             return '<Role %r>' % self.name
 
-        def inheritRole(self, role=None, roleName=None, roleId=None):
+        def inheritRole(self, role=None, roleName=None, kvDict=None):
             """
             Add a role from which permissions will be inherited.  Checks to make sure not trying to inherit itself,
             and itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
@@ -238,42 +258,10 @@ def _createRoleMixin(ext, db):
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
 
-            roleModel = get_model('role')
+            return _modelActionBase(self, instance=role, instanceName=roleName, kvDict=kvDict,
+                                    model=get_model('role'), db=db, action='add', modelType='role', inherit=True)
 
-            if role:
-                try:
-                    if self.name == role.name:
-                        return False, f'Role cannot inherit itself.'
-                except AttributeError:
-                    return False, f'{role} is not a valid Role.'
-                inheritedRole = role
-            elif roleName:
-                if self.name == str(roleName):
-                    return False, f'Role cannot inherit itself.'
-                inheritedRole = roleModel.query.filter_by(name=roleName).first()
-                if not inheritedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            elif roleId:
-                if self.id == int(roleId):
-                    return False, f'Role cannot inherit itself.'
-                inheritedRole = roleModel.query.filter_by(**{ext.role_pk: roleId}).first()
-                if not inheritedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            else:
-                return False, 'One of arguments role, roleName, or roleId must be specified.'
-
-            currentInheritedRoles = inheritedRoles(self)
-
-            if inheritedRole.name in currentInheritedRoles:
-                return False, f"<Role '{self.name}'> already inherits from <Role '{inheritedRole.name}'>."
-
-            self.parents.append(inheritedRole)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f"<Role '{self.name}'> now inherits from <Role '{inheritedRole.name}'>."
-
-        def removeInheritedRole(self, role=None, roleName=None, roleId=None):
+        def removeInheritedRole(self, role=None, roleName=None, kvDict=None):
             """
             Remove a role from which permissions were inherited.  Checks to make sure not trying to inherit itself,
             and itself is not inherited down the line.  Priority to arguments goes role, roleName, then roleId.
@@ -283,42 +271,8 @@ def _createRoleMixin(ext, db):
             :return: A tuple containing a boolean representing the success of the operation, and a response string.
             """
 
-            roleModel = get_model('role')
-
-            if role:
-                try:
-                    if self.name == role.name:
-                        return False, f'Role cannot remove itself.'
-                except AttributeError:
-                    return False, f'{role} is not a valid Role.'
-                inheritedRole = role
-            elif roleName:
-                if self.name == str(roleName):
-                    return False, f'Role cannot remove itself.'
-                inheritedRole = roleModel.query.filter_by(name=roleName).first()
-                if not inheritedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            elif roleId:
-                if self.id == int(roleId):
-                    return False, f'Role cannot remove itself.'
-                inheritedRole = roleModel.query.filter_by(**{ext.role_pk: roleId}).first()
-                if not inheritedRole:
-                    return False, f'{roleName} is not a valid Role name.'
-            else:
-                return False, 'One of arguments role, roleName, or roleId must be specified.'
-
-            currentInheritedRoles = inheritedRoles(self)
-
-            if inheritedRole.name not in currentInheritedRoles:
-                return False, f"<Role '{self.name}'> does not directly inherit from <Role '{inheritedRole.name}'>."
-
-            self.parents.remove(inheritedRole)
-            db.session.add(self)
-            db.session.commit()
-
-            return True, f"<Role '{self.name}'> no longer inherits directly from <Role '{inheritedRole.name}'>. " \
-                f"NOTE it may still inherit the Role (or the Role's permissions) " \
-                f"through another inherited Role's inherited Roles."
+            return _modelActionBase(self, instance=role, instanceName=roleName, kvDict=kvDict,
+                                    model=get_model('role'), db=db, action='add', modelType='role', inherit=True)
 
         def addPermission(self, permission=None, permName=None, kvDict=None):
             """
