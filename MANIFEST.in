@@ -1,2 +1,4 @@
+include flask_perms/manager/*
+include flask_perms/mixins/*
 include flask_perms/templates/*
 include README.md

@@ -97,14 +97,27 @@ class Flask_Perms(object):
         app.extensions['flask_perms'] = self
 
     def _get_db(self):
+        """
+        Returns the application database instance.
+        :return: SQLAlchemy database instance
+        """
         return current_app.extensions['sqlalchemy'].db
 
     def _get_model(self, model):
+        """
+        Returns the requested permissions-related database model instance for the application.
+        :param model: (str, options= 'user', 'role', 'perm') The model to return.
+        :return: SQLAlchemy Model instance
+        """
         for c in self.app_db.Model._decl_class_registry.values():
             if hasattr(c, '__table__') and c.__tablename__ == self.table_dict[model]:
                 return c
 
     def _update_app_context_with_perm_manager(self):
+        """
+        Adds an initialized permissions manager object to the application context stack.
+        :return: None
+        """
         ctx = _app_ctx_stack.top
         pm = _createManager(self, current_app, self._get_db())()
         pm.init()
@@ -116,6 +129,10 @@ perm_manager = LocalProxy(lambda: _get_manager())
 
 
 def _get_manager():
+    """
+    Retrieve the permission manager attached to the application context stack.
+    :return: Permission manager instance (or None)
+    """
     if has_app_context() and not hasattr(_app_ctx_stack.top, 'perm_manager'):
         current_app.extensions['flask_perms']._update_app_context_with_perm_manager()
 
