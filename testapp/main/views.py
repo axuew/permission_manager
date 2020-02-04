@@ -1,4 +1,5 @@
 from flask import current_app, request
+from flask_login import login_user, logout_user, current_user
 
 from testapp import db, login_manager
 
@@ -18,13 +19,27 @@ def load_user(user_id):
 
 @main.route('/')
 def index():
-    return 'hello!'
+    return 'Hello!'
+
+
+@main.route('/login/<id>')
+def login(id):
+    user = User.query.filter_by(id=id).first()
+    login_user(user, remember=True)
+    return f'Logged in {user.email}'
+
+
+@main.route('/logout')
+def logout():
+    logout_user()
+    return f'Logged out'
 
 
 @main.route('/num/<num>')
-@permission_required(['test'], api=True)
+@permission_required(['test'], roles=['Test Role'], api=True)
 def num_index(num):
 
     user = User.query.filter_by(id=num).first()
 
     return user.email
+

@@ -1,5 +1,5 @@
 from functools import wraps
-from flask import current_app, flash, redirect, url_for, abort, jsonify
+from flask import current_app, flash, redirect, url_for, abort, jsonify, make_response
 from flask_login import current_user
 
 
@@ -11,11 +11,13 @@ def _invalidRoleHandling(role, api):
     print(f'WARNING: {role} is not a valid Role, no Permissions parsed.')
     if 'view_permissions_errors' in current_user.permSet:
         if api:
-            return jsonify({'error': f'Role <{role}> specified as required but not found in Role store.'}), 500
+            abort(make_response(jsonify({'error': f'Role <{role}> specified as required but not found in Role store.'}),
+                                500))
         else:
             flash(f'Role <{role}> specified as required but not found in Role store.', 'danger')
     elif api:
-        return jsonify({'error': 'Internal Server Error'}), 500
+        abort(make_response(jsonify({'error': 'Internal Server Error'}), 500))
+
     abort(500)
 
 
@@ -40,31 +42,31 @@ def _getPermsRequired(useType, permissions=None, roles=None, api=False):
             if not localRole:
                 _invalidRoleHandling(role, api)
 
-            rolePerms = localRole.allPermissionsRoles()[0]
-            for p in rolePerms:
-                permsRequired.add(p.name)
+            permsRequired.update(localRole.allPermissionsRoles()[0])
+
     return permsRequired
 
 
 def _missingPermHandling(missingPerms, hide, api):
     if hide == "all":
         if api:
-            return jsonify({'error': 'Not Found'}), 404
+            abort(make_response(jsonify({'error': 'Not Found'}), 404))
         else:
             abort(404)
     elif 'view_missing_permissions' in current_user.permSet:
         if api:
-            return jsonify({'error': f'insufficient permissions', 'missing_permissions': list(missingPerms)}), 403
+            abort(make_response(jsonify({'error': f'insufficient permissions',
+                                         'missing_permissions': list(missingPerms)}), 403))
         else:
             flash(f'Insufficient permissions, missing: [{missingPerms}].', 'danger')
     else:
         if hide == "admin":
             if api:
-                return jsonify({'error': 'Not Found'}), 404
+                abort(make_response(jsonify({'error': 'Not Found'}), 404))
             else:
                 abort(404)
         if api:
-            return jsonify({'error': 'unauthorized'}), 403
+            abort(make_response(jsonify({'error': 'unauthorized'}), 403))
         else:
             flash('Unauthorized access.  Please check with an administrator.', 'danger')
     print('redirecting')
@@ -72,9 +74,9 @@ def _missingPermHandling(missingPerms, hide, api):
 
 
 def _permissionRouteHandling(useType, permissions=None, roles=None, hide='', api=False):
-    permsRequired = _getPermsRequired(useType, permissions, roles, api)
-
     refreshPermissions()
+
+    permsRequired = _getPermsRequired(useType, permissions, roles, api)
 
     missingPerms = permsRequired.difference(current_user.permSet)
 
@@ -149,12 +151,12 @@ def permission_required(permissions=None, roles=None, hide='', api=False):
 
             elif not hide or hide == 'off':
                 if api:
-                    return jsonify({'error': 'unauthorized'}), 401
+                    abort(make_response(jsonify({'error': 'unauthorized'}), 401))
                 flash('Please log in to access this page.', 'warning')
                 return redirect(url_for('main.index'))  # ToDo Set this to a config variable
             else:
                 if api:
-                    return jsonify({}), 404
+                    return abort(make_response(jsonify({}), 404))
                 abort(404)
         return decorated_function
     return decorator
@@ -191,6 +193,6 @@ def bp_permission_required(permissions=None, roles=None, hide='', func=None, api
             return redirect(url_for('main.index'))
         else:
             if api:
-                return jsonify({}), 404
+                abort(make_response(jsonify({}), 404))
             abort(404)
     return decorated_function
